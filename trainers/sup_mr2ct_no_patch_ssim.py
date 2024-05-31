@@ -20,6 +20,7 @@ from tensorboardX import SummaryWriter
 
 from models.generators.unet import UNet
 from models.discriminators.patchgan import NLayerDiscriminator
+from monai.losses.ssim_loss import SSIMLoss
 
 from utils.lr_scheduler import LinearWarmupCosineAnnealingLR
 from utils.utils import distributed_all_gather, AverageMeter, set_random_seed
@@ -57,31 +58,23 @@ class TranslationTrainer:
                 logger.info(f"expdir is {self.expdir}")
                 
             else:
-                if args.resume and not args.load_weights:
-                    expdir = dirname(args.resume_path)
-                    self.expdir = expdir
-                    logger.add(os.path.join(expdir, "logging.log"))
-                    self.writer = SummaryWriter(expdir)
-                    
-                    logger.info(f"expdir is {self.expdir}")
-                else:
-                    exp_num = 1
-                    expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
-                    if os.path.exists(expdir):
-                        while True:
-                            exp_num += 1
-                            expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
-                            if not os.path.exists(expdir):
-                                break
-                    os.makedirs(expdir, exist_ok=True)
-                    self.expdir = expdir
-                    
-                    copyfile(config_path, os.path.join(expdir, os.path.basename(config_path)))
-                    logger.add(os.path.join(expdir, "logging.log"))
+                exp_num = 1
+                expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
+                if os.path.exists(expdir):
+                    while True:
+                        exp_num += 1
+                        expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
+                        if not os.path.exists(expdir):
+                            break
+                os.makedirs(expdir, exist_ok=True)
+                self.expdir = expdir
+                
+                copyfile(config_path, os.path.join(expdir, os.path.basename(config_path)))
+                logger.add(os.path.join(expdir, "logging.log"))
 
-                    self.visual = Visualizer(config, expdir)
-                    
-                    logger.info(f"expdir is {self.expdir}")
+                self.visual = Visualizer(config, expdir)
+                
+                logger.info(f"expdir is {self.expdir}")
             
         set_random_seed(config['random_seed'])
         self.config = config
@@ -127,6 +120,85 @@ class TranslationTrainer:
 
         return fake_target_images
 
+    def get_ssim_loss(self, fake_ct, ct_img):
+        b, c, h, w, d = ct_img.shape
+        # calculate 3D SSIM loss
+        with torch.no_grad():
+            fake_ct_min = fake_ct.min()
+            fake_ct_max = fake_ct.max()
+            fake_ct_data_range = fake_ct_max - fake_ct_min
+
+            ct_min = ct_img.min()
+            ct_max = ct_img.max()
+            ct_data_range = ct_max - ct_min
+
+        norm_fake_ct = (fake_ct - fake_ct_min) / fake_ct_data_range
+        norm_ct_img = (ct_img - ct_min) / ct_data_range
+
+        # adaptively scale the 3d ssim loss
+        loss_ssim_3d_unscaled = self.criterion_ssim_3d(norm_fake_ct, norm_ct_img)
+        loss_ssim_3d = ct_data_range * loss_ssim_3d_unscaled
+
+        # calculate 2D SSIM loss
+        def calculate_2d_ssim_loss(fake_ct_slices, ct_slices):
+            # fake_ct_slices shape of (-1, h, w)
+            # ct_slices shape of (-1, h, w)
+            with torch.no_grad():
+                fake_ct_min_plane = fake_ct_slices.min(dim=1)[0].min(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                fake_ct_max_plane = fake_ct_slices.max(dim=1)[0].max(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                fake_ct_data_range_plane = fake_ct_max_plane - fake_ct_min_plane
+
+                ct_min_plane = ct_slices.min(dim=1)[0].min(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                ct_max_plane = ct_slices.max(dim=1)[0].max(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                ct_data_range_plane = ct_max_plane - ct_min_plane
+
+                # select non-zero slices for SSIM loss to avoid zero denomiator error during normalization
+                non_zero_mask = (fake_ct_data_range_plane == 0) | (ct_data_range_plane == 0)
+                non_zero_mask = ~non_zero_mask.squeeze()
+
+            # print(fake_ct_slices.shape, ct_slices.shape, non_zero_mask.sum())
+            norm_fake_ct_slices = (fake_ct_slices[non_zero_mask] - fake_ct_min_plane[non_zero_mask]) / fake_ct_data_range_plane[non_zero_mask]
+            norm_ct_slices = (ct_slices[non_zero_mask] - ct_min_plane[non_zero_mask]) / ct_data_range_plane[non_zero_mask]
+
+            # adaptively scale the 2d plane ssim loss
+            loss_ssim_plane_unscaled = self.criterion_ssim_2d(
+                norm_fake_ct_slices.unsqueeze(0), norm_ct_slices.unsqueeze(0)
+                )
+            loss_ssim_plane = ct_data_range_plane[non_zero_mask] * loss_ssim_plane_unscaled
+            return loss_ssim_plane_unscaled.mean(), loss_ssim_plane.mean()
+        
+        # calculate yz plane 2D SSIM loss
+        fake_ct_yz_slices = fake_ct.reshape(-1, w, d)
+        ct_yz_slices = ct_img.reshape(-1, w, d)
+
+        # adaptively scale the yz plane 2d ssim loss
+        loss_ssim_yz_unscaled, loss_ssim_yz = calculate_2d_ssim_loss(fake_ct_yz_slices, ct_yz_slices)
+        
+        # calculate xz plane 2D SSIM loss
+        fake_ct_xz_slices = fake_ct.permute(0, 1, 3, 2, 4).reshape(-1, h, d)
+        ct_xz_slices = ct_img.permute(0, 1, 3, 2, 4).reshape(-1, h, d)
+
+        # adaptively scale the xz plane 2d ssim loss
+        loss_ssim_xz_unscaled, loss_ssim_xz = calculate_2d_ssim_loss(fake_ct_xz_slices, ct_xz_slices)
+
+        # calculate xy plane 2D SSIM loss
+        fake_ct_xy_slices = fake_ct.permute(0, 1, 4, 2, 3).reshape(-1, h, w)
+        ct_xy_slices = ct_img.permute(0, 1, 4, 2, 3).reshape(-1, h, w)
+
+        # adaptively scale the xy plane 2d ssim loss
+        loss_ssim_xy_unscaled, loss_ssim_xy = calculate_2d_ssim_loss(fake_ct_xy_slices, ct_xy_slices)
+
+        return {
+            "loss_ssim_3d": loss_ssim_3d,
+            "loss_ssim_yz": loss_ssim_yz,
+            "loss_ssim_xz": loss_ssim_xz,
+            "loss_ssim_xy": loss_ssim_xy,
+            "loss_ssim_3d_unscaled": loss_ssim_3d_unscaled,
+            "loss_ssim_yz_unscaled": loss_ssim_yz_unscaled,
+            "loss_ssim_xz_unscaled": loss_ssim_xz_unscaled,
+            "loss_ssim_xy_unscaled": loss_ssim_xy_unscaled,
+        }
+
     def run_train_epoch(self, train_loader):
         if self.ddp:
             train_loader.sampler.set_epoch(self.epoch)
@@ -135,12 +207,13 @@ class TranslationTrainer:
         self.G.train()
         
         G_loss = AverageMeter()
+        ssim_loss = AverageMeter()
 
         for idx, batch in enumerate(train_loader):
             log_losses = dict()
 
-            mr_img = self.reorganize_batch(batch['mr_image']).cuda(self.local_rank)
-            ct_img = self.reorganize_batch(batch['ct_image']).cuda(self.local_rank)
+            mr_img = batch['mr_image'].cuda(self.local_rank)
+            ct_img = batch['ct_image'].cuda(self.local_rank)
 
             # ==================================
             # ======= update generators ========
@@ -150,16 +223,45 @@ class TranslationTrainer:
             if not self.amp:
                 fake_ct = self.forward_G(mr_img,)
 
-                loss_G = self.criterion(fake_ct, ct_img)
+                loss_l1 = self.criterion(fake_ct, ct_img)
+
+                loss_ssim_dict = self.get_ssim_loss(fake_ct, ct_img)
+                loss_ssim = self.config['lambda_ssim_3d'] * loss_ssim_dict['loss_ssim_3d'] + \
+                    self.config['lambda_ssim_yz'] * loss_ssim_dict['loss_ssim_yz'] + \
+                    self.config['lambda_ssim_xz'] * loss_ssim_dict['loss_ssim_xz'] + \
+                    self.config['lambda_ssim_xy'] * loss_ssim_dict['loss_ssim_xy']
+                # loss_ssim = self.G.learnable_ssim_lambda_3d * loss_ssim_dict['loss_ssim_3d'] + \
+                #             self.G.learnable_ssim_lambda_2d_yz * loss_ssim_dict['loss_ssim_yz'] + \
+                #             self.G.learnable_ssim_lambda_2d_xz * loss_ssim_dict['loss_ssim_xz'] + \
+                #             self.G.learnable_ssim_lambda_2d_xy * loss_ssim_dict['loss_ssim_xy']
+
+                loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim
                 
                 loss_G.backward()
             else:
                 with torch.cuda.amp.autocast():
                     fake_ct = self.forward_G(mr_img,)
 
-                    loss_G = self.criterion(fake_ct, ct_img)
+                    loss_l1 = self.criterion_l1(fake_ct, ct_img)
+
+                    loss_ssim_dict = self.get_ssim_loss(fake_ct, ct_img)
+                    loss_ssim = self.config['lambda_ssim_3d'] * loss_ssim_dict['loss_ssim_3d'] + \
+                            self.config['lambda_ssim_yz'] * loss_ssim_dict['loss_ssim_yz'] + \
+                            self.config['lambda_ssim_xz'] * loss_ssim_dict['loss_ssim_xz'] + \
+                            self.config['lambda_ssim_xy'] * loss_ssim_dict['loss_ssim_xy']
+                    # loss_ssim = self.G.learnable_ssim_lambda_3d * loss_ssim_dict['loss_ssim_3d'] + \
+                    #         self.G.learnable_ssim_lambda_2d_yz * loss_ssim_dict['loss_ssim_yz'] + \
+                    #         self.G.learnable_ssim_lambda_2d_xz * loss_ssim_dict['loss_ssim_xz'] + \
+                    #         self.G.learnable_ssim_lambda_2d_xy * loss_ssim_dict['loss_ssim_xy']
+
+                    loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim
 
                     self.scaler.scale(loss_G).backward()
+            
+            # for name, param in self.G.named_parameters():
+            #     print(name)
+            #     self.visual.writer.add_histogram(name, param, self.epoch * len(train_loader) + idx)
+            #     self.visual.writer.add_histogram(name + "_grad", param.grad, self.epoch * len(train_loader) + idx)
 
             if (idx + 1) % self.gradient_accumulation_step == 0 or (idx + 1) == len(train_loader):
                 if self.amp:
@@ -170,20 +272,38 @@ class TranslationTrainer:
                     self.optimizer_G.step()
                     self.optimizer_G.zero_grad()
             
-            log_losses["loss_G"] = loss_G.detach()
+            log_losses['loss_G'] = loss_l1.detach()
+            log_losses['loss_ssim'] = loss_ssim.detach()
+            log_losses['loss_ssim_3d'] = loss_ssim_dict['loss_ssim_3d'].detach()
+            log_losses['loss_ssim_yz'] = loss_ssim_dict['loss_ssim_yz'].detach()
+            log_losses['loss_ssim_xz'] = loss_ssim_dict['loss_ssim_xz'].detach()
+            log_losses['loss_ssim_xy'] = loss_ssim_dict['loss_ssim_xy'].detach()
+            log_losses['loss_ssim_3d_unscaled'] = loss_ssim_dict['loss_ssim_3d_unscaled'].detach()
+            log_losses['loss_ssim_yz_unscaled'] = loss_ssim_dict['loss_ssim_yz_unscaled'].detach()
+            log_losses['loss_ssim_xz_unscaled'] = loss_ssim_dict['loss_ssim_xz_unscaled'].detach()
+            log_losses['loss_ssim_xy_unscaled'] = loss_ssim_dict['loss_ssim_xy_unscaled'].detach()
+            log_losses['loss_total'] = loss_G.detach()
+            # log_losses['learnable_ssim_lambda_3d'] = self.G.learnable_ssim_lambda_3d.detach()
+            # log_losses['learnable_ssim_lambda_2d_yz'] = self.G.learnable_ssim_lambda_2d_yz.detach()
+            # log_losses['learnable_ssim_lambda_2d_xz'] = self.G.learnable_ssim_lambda_2d_xz.detach()
+            # log_losses['learnable_ssim_lambda_2d_xy'] = self.G.learnable_ssim_lambda_2d_xy.detach()
                 
             if (idx + 1) % self.gradient_accumulation_step == 0 or (idx + 1) == len(train_loader):
                 if self.ddp:
-                    loss_list = distributed_all_gather([loss_G, ], out_numpy=True, is_valid=idx < len(train_loader))
+                    loss_list = distributed_all_gather([loss_G, loss_ssim], out_numpy=True, is_valid=idx < len(train_loader))
                     G_loss.update(
                         np.mean(loss_list[0], axis=0), n=self.config['batch_size'] * self.world_size * self.gradient_accumulation_step
+                    )
+                    ssim_loss.update(
+                        np.mean(loss_list[1], axis=0), n=self.config['batch_size'] * self.world_size * self.gradient_accumulation_step
                     )
 
                 else:
                     G_loss.update(loss_G.detach().cpu().numpy().mean(), n=self.config['batch_size'] * self.gradient_accumulation_step)
+                    ssim_loss.update(loss_ssim.detach().cpu().numpy().mean(), n=self.config['batch_size'] * self.gradient_accumulation_step)
 
                 if self.local_rank == 0:
-                    logger.info(f"Epoch {self.epoch}/{self.config['total_epochs']} {idx}/{len(train_loader)} loss_G: {G_loss.avg:.4f}")
+                    logger.info(f"Epoch {self.epoch}/{self.config['total_epochs']} {idx}/{len(train_loader)} loss_G: {G_loss.avg:.4f} loss_ssim: {ssim_loss.avg:.4f}")
                     self.visual.plot_current_errors(log_losses, idx + self.epoch * len(train_loader))
         
         self.lr_sche_G.step()
@@ -203,12 +323,7 @@ class TranslationTrainer:
             mr_img = torch.from_numpy(images['mr_image']).unsqueeze(0).cuda(self.local_rank)
             ct_img = torch.from_numpy(images['ct_image']).unsqueeze(0).cuda(self.local_rank)
         
-        if mode == "train":
-            # print(mr_img.shape, ct_img.shape)
-            mr_img = mr_img[0, 0:1]
-            ct_img = ct_img[0, 0:1]
-        
-        fake_ct = self.sliding_window_infer(mr_img, self.G)
+        fake_ct = self.forward_G(mr_img)
 
         error_image = (fake_ct - ct_img).abs()
         error_image = (error_image - error_image.min()) / (error_image.max() - error_image.min())
@@ -235,12 +350,21 @@ class TranslationTrainer:
                 mr_img = torch.from_numpy(images['mr_image']).unsqueeze(0).cuda(self.local_rank)
                 ct_img = torch.from_numpy(images['ct_image']).unsqueeze(0).cuda(self.local_rank)
             
-            fake_ct = self.sliding_window_infer(mr_img, self.G)
+            fake_ct = self.forward_G(mr_img)
 
             error_image = (fake_ct - ct_img).abs()
             error_image = (error_image - error_image.min()) / (error_image.max() - error_image.min())
 
-            loss.update(self.criterion(fake_ct, ct_img).item(), n=1)
+            loss_l1 = self.criterion(fake_ct, ct_img)
+            loss_ssim_dict = self.get_ssim_loss(fake_ct, ct_img)
+            loss_ssim = self.config['lambda_ssim_3d'] * loss_ssim_dict['loss_ssim_3d'] + \
+                    self.config['lambda_ssim_yz'] * loss_ssim_dict['loss_ssim_yz'] + \
+                    self.config['lambda_ssim_xz'] * loss_ssim_dict['loss_ssim_xz'] + \
+                    self.config['lambda_ssim_xy'] * loss_ssim_dict['loss_ssim_xy']
+
+            loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim
+
+            loss.update(loss_G.item(), n=1)
 
         return loss.avg
 
@@ -259,11 +383,18 @@ class TranslationTrainer:
             if self.local_rank == 0:
                 logger.info(f"epoch {epoch} lr is {self.optimizer_G.state_dict()['param_groups'][0]['lr']}")
             
+            # if self.local_rank == 0:
+            #     # visualizations
+            #     generated_images = self.run_eval_epoch(valid_ds)
+            #     self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="valid")
+
+            #     val_loss = self.run_eval_epoch_loss(valid_ds)
+            
             self.run_train_epoch(train_loader)
             
             if self.local_rank == 0 and (epoch + 1) % self.config["save_checkpoint_freq"] == 0:
                 # visualizations
-                generated_images = self.run_eval_epoch(train_ds, mode="train")
+                generated_images = self.run_eval_epoch(train_ds)
                 self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="train")
                 generated_images = self.run_eval_epoch(valid_ds)
                 self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="valid")
@@ -300,11 +431,10 @@ class TranslationTrainer:
             transformer_layers = self.config['transformer_layers']
             num_residual_units = self.config['num_residual_units']
             self.G = ShuffleUNet(dimensions=3, in_channels=1, out_channels=1,
-                    channels=(32, 64, 128, 256, 384), 
+                    channels=(32, 64, 128, 256, 384),
                     strides=(2, 2, 2, 2),
-                    kernel_size = 3, up_kernel_size = 3, num_res_units=num_residual_units, 
-                    img_size=img_size, transformer_layers=transformer_layers)
-            print(self.G)
+                    kernel_size=3, up_kernel_size=3, num_res_units=num_residual_units, img_size=img_size, 
+                    transformer_layers=transformer_layers)
         elif model_name == "unet":
             strides = self.config['strides']
             filters = self.config['filters'][: len(strides)]
@@ -365,6 +495,8 @@ class TranslationTrainer:
         self.criterion_l1 = nn.L1Loss()
 
         self.criterion = nn.L1Loss() if self.config['criterion'] == "l1" else nn.MSELoss()
+        self.criterion_ssim_3d = SSIMLoss(spatial_dims=3, data_range=1.0)  # for whole image ssim loss
+        self.criterion_ssim_2d = SSIMLoss(spatial_dims=2, data_range=1.0, reduction="none")  # calculating ssim loss for each slice as then averaging them
     
     @torch.no_grad()
     def visualization(self, generated_images_dict, step, mode):
@@ -393,7 +525,12 @@ class TranslationTrainer:
         logger.info(f"Load checkpoint from {checkpoint_path}")
         G_state_dict = state_dict['G']
 
-        self.G.load_state_dict(G_state_dict)
+        if not self.ddp:
+            self.G.load_weights(G_state_dict)
+        else:
+            self.G.module.load_weights(G_state_dict)
+
+        # self.G.load_state_dict(G_state_dict)
 
     def load_checkpoint(self, checkpoint_path):
         state_dict = torch.load(checkpoint_path)

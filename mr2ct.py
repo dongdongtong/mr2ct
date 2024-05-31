@@ -1,35 +1,36 @@
 #!/usr/bin/env python
-# mr-to-pct_script.py
-# Runs mr to pct as a python script
-# Inputs:
-#   input_mr_file       Filename of your T1w MRI including full path
-#   output_pct_file     Filename to give the output pCT including full path
-#
-# SNY: Wed 23 Nov 08:51:11 GMT 2022
+# written by: Dr. Shaodong Ding 2024-05-30
+# mr2ct, folder, or file path
 
-import sys, os, torch
+import os
+from os.path import dirname, basename, join
+import sys
+import SimpleITK as sitk
+import torch
 
 from utils.infer_funcs import do_mr_to_pct
 
-# set device, use cuda if available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Set input and output data file paths
-input_mr_file = "data_precise/sub-010326_ses-001_T1w.nii.gz"
-output_pct_file = "data_precise/peudo_ct.nii"
+input_mr_path = "./MAGUIXIA_0000.nii.gz"
+out_pseudo_ct_path = "./MAGUIXIA_0000_pseudo_ct_transformer.nii.gz"
 
-# Set trained model to load
-saved_model = torch.load("pretrained_weights/pretrained_net_final_20220825.pth", map_location=device)
+# transformer + L1 loss
+# pretrained_model_path = "runs/mr2ct_supervise_transformer/no_weight_decay/model_best.pt"
+# state_dict = torch.load(pretrained_model_path)['G']
 
-# Do you want to prepare the t1 image? This will perform bias correction and create a head mask
-# yes = True, no = False. Output will be saved to _prep.nii
-prep_t1 = True
+# transformer + L1 loss + SSIM loss
+pretrained_model_path = "runs/mr2ct_supervise_transformer_ssim/2/model_best.pt"
+state_dict = torch.load(pretrained_model_path)['G']
 
-# Do you want to produce an example plot? yes = True, no = False.
-plot_mrct = False
+# pretrained_model_path = "runs/mr2ct_supervise_larger_patch/1/model_best.pt"
+# state_dict = torch.load(pretrained_model_path)['G']
 
-print('T1w MR input file path: {}'.format(input_mr_file))
-print('pCT output file path: {}'.format(output_pct_file))
-
-# Run MR to pCT
-do_mr_to_pct(input_mr_file, output_pct_file, saved_model, device, prep_t1, plot_mrct)
+do_mr_to_pct(
+    input_mr_file=input_mr_path, 
+    output_pct_file=out_pseudo_ct_path, 
+    saved_model=state_dict, 
+    device="cuda", prep_t1=False,
+    sliding_window_infer=False,
+    transformer_layers=3, 
+    img_size=(448, 448, 64)
+)

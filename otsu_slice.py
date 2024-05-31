@@ -1,63 +1,72 @@
-import cv2
-import numpy as np
+from monai.losses import SSIMLoss
+import torch
 import SimpleITK as sitk
-from tqdm import tqdm
+import nibabel as nib
+import os
+import numpy as np
 
-from preprocess.brain_extractor import BrainExtractor
+
+# pct =  nib.load("./MAGUIXIA_0000_pseudo_ct.nii.gz").get_fdata()
+# ref_ct = nib.load("./ct_MAGUIXIA_0000.nii.gz").get_fdata()
+
+# pct = torch.tensor(pct).unsqueeze(0).unsqueeze(0).float().cuda()
+# ref_ct = torch.tensor(ref_ct).unsqueeze(0).unsqueeze(0).float().cuda()
+# pct.requires_grad = True
+# ref_ct.requires_grad = True
+# # print(pct.min(), pct.max(), ref_ct.min(), ref_ct.max())
+
+# with torch.no_grad():
+#     data_range = ref_ct.max() - ref_ct.min()
+# norm_pct = (pct - pct.min()) / (pct.max() - pct.min())
+# norm_ref_ct = (ref_ct - ref_ct.min()) / (ref_ct.max() - ref_ct.min())
+# norm_pct.retain_grad()
+# norm_ref_ct.retain_grad()
+
+# ssim_loss = SSIMLoss(spatial_dims=3, data_range=1.0)
+# # loss = ssim_loss(pct - pct.min(), ref_ct - ref_ct.min())
+# norm_loss = ssim_loss(norm_pct, norm_ref_ct)
+# # print("before norm:", loss.item(), "after norm:", norm_loss.item())
+# print("after norm:", norm_loss.item())
+
+# norm_loss = data_range.item() * norm_loss
+# norm_loss.backward(retain_graph=True)
+# print(norm_pct.grad.min(), norm_pct.grad.max(), norm_ref_ct.grad.min(), norm_ref_ct.grad.max())
+# print(pct.grad.min(), pct.grad.max(), ref_ct.grad.min(), ref_ct.grad.max())
+
+# ssim_loss = SSIMLoss(spatial_dims=2,)
+# # x -axis ssim loss
+# a = torch.zeros(1, 1, 256, 256)
+# b = torch.zeros(1, 1, 256, 256)
+# a.requires_grad = True
+# b.requires_grad = True
+# print(ssim_loss(a, b))
+# ssim_loss(a, b).backward()
+# print(a.grad)
+
+# # y -axis ssim loss
+# print(ssim_loss(pct[0].permute(0, 2, 1, 3), ref_ct[0].permute(0, 2, 1, 3)))
+
+# # z -axis ssim loss
+# print(ssim_loss(pct[0].permute(0, 3, 1, 2), ref_ct[0].permute(0, 3, 1, 2)))
 
 
-def apply_otsu_to_each_slice(input_image_path, output_image_path):
-    # Read the input CT image
-    input_image = sitk.ReadImage(input_image_path)
-    
-    # Convert the SimpleITK image to a numpy array
-    input_array = sitk.GetArrayFromImage(input_image)
+directory = 'data/ct_reg2_mr_betneck/ct_reg2_mr'  # Replace with the actual directory path
 
-    if np.max(input_array) < 0:
-        pass
-    else:
-        input_array = np.clip(input_array, -1024, 3071)
+wmin = 999
+wmax = 0
+for filename in os.listdir(directory):
+    if filename.endswith('.nii.gz'):
+        file_path = os.path.join(directory, filename)
+        data = nib.load(file_path).get_fdata()
+        data_min = data.min()
+        data_max = data.max()
+        data_max = np.percentile(data, 99.995)
+        print(f"File: {filename}, Min: {data_min}, Max: {data_max}")
 
-    # initialize the brain extractor
-    be = BrainExtractor()
-    
-    # Initialize an empty list to store the processed slices
-    processed_slices = []
-    
-    # Iterate over each axial slice
-    for slice_index in tqdm(range(input_image.GetDepth())):
-        # Get the current axial slice
-        slice_array = input_array[slice_index, :,:]
+        if data_min < wmin:
+            wmin = data_min
         
-        # Convert the slice to uint8 (required by OpenCV)
-        slice_uint8 = cv2.normalize(slice_array, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-        
-        # Apply Otsu's thresholding method to the slice
-        _, binary_slice = cv2.threshold(slice_uint8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if data_max > wmax:
+            wmax = data_max
 
-        binary_slice = be._fill_hole(binary_slice[:, :, None])
-
-        cv2.erode(binary_slice, np.ones((5, 5), np.uint8), binary_slice, iterations=1)
-        
-        # Append the processed slice to the list
-        processed_slices.append(binary_slice)
-    
-    # Convert the list of processed slices to a numpy array
-    processed_array = np.array(processed_slices)
-    
-    # Convert the numpy array back to a SimpleITK image
-    processed_image = be.array2image(processed_array, input_image)
-
-    # mask the CT image
-    processed_image = sitk.Mask(input_image, processed_image)
-    
-    # Write the processed image to disk
-    sitk.WriteImage(processed_image, output_image_path)
-    
-    print("Otsu thresholding applied to each axial slice. Resulting image saved as:", output_image_path)
-
-# Example usage
-input_image_path = "data/pipeline_niigz_betneck/ct/MENGKE_0000.nii.gz"  # Replace with the path to your input CT image
-output_image_path = "./MENGKE_0000_otsuonslice_erode_1.nii.gz"  # Specify the path for the output segmented image
-
-apply_otsu_to_each_slice(input_image_path, output_image_path)
+print(wmin, wmax)

@@ -90,17 +90,17 @@ def do_prep_aligned_ct_mr(ct_file, out_root_dir):
         aff_metric='mattes',
     )
 
-    # # apply the affine matrix to the preprocessed ct image
-    # reged_ct_brainmask = ants.apply_transforms(
-    #     fixed=mr_img_pre, 
-    #     moving=ct_img_mask, 
-    #     transformlist=out_dict['fwdtransforms'],
-    #     interpolator='nearestNeighbor')
+    # apply the affine matrix to the preprocessed ct image
+    reged_ct = ants.apply_transforms(
+        fixed=mr_img_pre, 
+        moving=ct_img_pre, 
+        transformlist=out_dict['fwdtransforms'],
+        interpolator='bSpline', defaultvalue=-1024)
 
     reg_ct_dir = join(out_root_dir, "ct_reg2_mr")
     os.makedirs(reg_ct_dir, exist_ok=True)
     reg_ct_file = join(reg_ct_dir, fn)
-    ants.image_write(out_dict['warpedmovout'], reg_ct_file)
+    ants.image_write(reged_ct, reg_ct_file)
 
 
 def main():

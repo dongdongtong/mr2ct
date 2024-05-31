@@ -20,6 +20,7 @@ from tensorboardX import SummaryWriter
 
 from models.generators.unet import UNet
 from models.discriminators.patchgan import NLayerDiscriminator
+from monai.losses.ssim_loss import SSIMLoss
 
 from utils.lr_scheduler import LinearWarmupCosineAnnealingLR
 from utils.utils import distributed_all_gather, AverageMeter, set_random_seed
@@ -57,31 +58,23 @@ class TranslationTrainer:
                 logger.info(f"expdir is {self.expdir}")
                 
             else:
-                if args.resume and not args.load_weights:
-                    expdir = dirname(args.resume_path)
-                    self.expdir = expdir
-                    logger.add(os.path.join(expdir, "logging.log"))
-                    self.writer = SummaryWriter(expdir)
-                    
-                    logger.info(f"expdir is {self.expdir}")
-                else:
-                    exp_num = 1
-                    expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
-                    if os.path.exists(expdir):
-                        while True:
-                            exp_num += 1
-                            expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
-                            if not os.path.exists(expdir):
-                                break
-                    os.makedirs(expdir, exist_ok=True)
-                    self.expdir = expdir
-                    
-                    copyfile(config_path, os.path.join(expdir, os.path.basename(config_path)))
-                    logger.add(os.path.join(expdir, "logging.log"))
+                exp_num = 1
+                expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
+                if os.path.exists(expdir):
+                    while True:
+                        exp_num += 1
+                        expdir = os.path.join(os.path.dirname(os.path.dirname(config_path)), "runs", os.path.basename(config_path).split(".")[0], str(exp_num))
+                        if not os.path.exists(expdir):
+                            break
+                os.makedirs(expdir, exist_ok=True)
+                self.expdir = expdir
+                
+                copyfile(config_path, os.path.join(expdir, os.path.basename(config_path)))
+                logger.add(os.path.join(expdir, "logging.log"))
 
-                    self.visual = Visualizer(config, expdir)
-                    
-                    logger.info(f"expdir is {self.expdir}")
+                self.visual = Visualizer(config, expdir)
+                
+                logger.info(f"expdir is {self.expdir}")
             
         set_random_seed(config['random_seed'])
         self.config = config
@@ -139,8 +132,8 @@ class TranslationTrainer:
         for idx, batch in enumerate(train_loader):
             log_losses = dict()
 
-            mr_img = self.reorganize_batch(batch['mr_image']).cuda(self.local_rank)
-            ct_img = self.reorganize_batch(batch['ct_image']).cuda(self.local_rank)
+            mr_img = batch['mr_image'].cuda(self.local_rank)
+            ct_img = batch['ct_image'].cuda(self.local_rank)
 
             # ==================================
             # ======= update generators ========
@@ -203,12 +196,7 @@ class TranslationTrainer:
             mr_img = torch.from_numpy(images['mr_image']).unsqueeze(0).cuda(self.local_rank)
             ct_img = torch.from_numpy(images['ct_image']).unsqueeze(0).cuda(self.local_rank)
         
-        if mode == "train":
-            # print(mr_img.shape, ct_img.shape)
-            mr_img = mr_img[0, 0:1]
-            ct_img = ct_img[0, 0:1]
-        
-        fake_ct = self.sliding_window_infer(mr_img, self.G)
+        fake_ct = self.forward_G(mr_img)
 
         error_image = (fake_ct - ct_img).abs()
         error_image = (error_image - error_image.min()) / (error_image.max() - error_image.min())
@@ -235,7 +223,7 @@ class TranslationTrainer:
                 mr_img = torch.from_numpy(images['mr_image']).unsqueeze(0).cuda(self.local_rank)
                 ct_img = torch.from_numpy(images['ct_image']).unsqueeze(0).cuda(self.local_rank)
             
-            fake_ct = self.sliding_window_infer(mr_img, self.G)
+            fake_ct = self.forward_G(mr_img)
 
             error_image = (fake_ct - ct_img).abs()
             error_image = (error_image - error_image.min()) / (error_image.max() - error_image.min())
@@ -259,11 +247,18 @@ class TranslationTrainer:
             if self.local_rank == 0:
                 logger.info(f"epoch {epoch} lr is {self.optimizer_G.state_dict()['param_groups'][0]['lr']}")
             
+            # if self.local_rank == 0:
+            #     # visualizations
+            #     generated_images = self.run_eval_epoch(valid_ds)
+            #     self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="valid")
+
+            #     val_loss = self.run_eval_epoch_loss(valid_ds)
+            
             self.run_train_epoch(train_loader)
             
             if self.local_rank == 0 and (epoch + 1) % self.config["save_checkpoint_freq"] == 0:
                 # visualizations
-                generated_images = self.run_eval_epoch(train_ds, mode="train")
+                generated_images = self.run_eval_epoch(train_ds)
                 self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="train")
                 generated_images = self.run_eval_epoch(valid_ds)
                 self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="valid")
@@ -300,11 +295,10 @@ class TranslationTrainer:
             transformer_layers = self.config['transformer_layers']
             num_residual_units = self.config['num_residual_units']
             self.G = ShuffleUNet(dimensions=3, in_channels=1, out_channels=1,
-                    channels=(32, 64, 128, 256, 384), 
+                    channels=(32, 64, 128, 256, 384),
                     strides=(2, 2, 2, 2),
-                    kernel_size = 3, up_kernel_size = 3, num_res_units=num_residual_units, 
-                    img_size=img_size, transformer_layers=transformer_layers)
-            print(self.G)
+                    kernel_size=3, up_kernel_size=3, num_res_units=num_residual_units, img_size=img_size, 
+                    transformer_layers=transformer_layers)
         elif model_name == "unet":
             strides = self.config['strides']
             filters = self.config['filters'][: len(strides)]
@@ -393,7 +387,12 @@ class TranslationTrainer:
         logger.info(f"Load checkpoint from {checkpoint_path}")
         G_state_dict = state_dict['G']
 
-        self.G.load_state_dict(G_state_dict)
+        if not self.ddp:
+            self.G.load_weights(G_state_dict)
+        else:
+            self.G.module.load_weights(G_state_dict)
+
+        # self.G.load_state_dict(G_state_dict)
 
     def load_checkpoint(self, checkpoint_path):
         state_dict = torch.load(checkpoint_path)

@@ -68,13 +68,6 @@ if __name__ == "__main__":
 
 
     args = parser.parse_args()
-
-    if args.resume:
-        work_dir = args.resume_path
-        from glob import glob
-        config_path = list(glob(os.path.join(work_dir, "*.yml")))[0]
-        print("Current config path is", config_path)
-        args.config = config_path
     
     # with open(args.config) as f:
     #     config = yaml.load(f, Loader=yaml.FullLoader)
