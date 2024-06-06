@@ -185,7 +185,10 @@ class Visualizer(object):
             if tag == "cur_evaluate_dice":
                 pass
             else:
-                value = value.mean().cpu().numpy()
+                try:
+                    value = value.mean().cpu().numpy()
+                except Exception:
+                    pass
             self.writer.add_scalar(tag, value, step)
 
     def print_current_errors(self, epoch, i, errors, t):

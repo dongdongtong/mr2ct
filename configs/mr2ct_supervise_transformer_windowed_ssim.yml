@@ -12,7 +12,7 @@ in_channel: 1   # in_channel is the same as the out_channel in cyclegan
 model_name: shuffleunet  # shuffleunet, unet
 transformer_layers: 3
 num_residual_units: 0
-shuffleunet_filters: [64, 128, 256, 384, 768]
+shuffleunet_filters: [32, 64, 128, 256, 384]
 filters: [64, 96, 128, 192, 256, 384, 512, 768, 1024]  # filters reference from Optimized U-Net for Brain Tumor Segmentation <https://arxiv.org/pdf/2110.03352.pdf>
 kernel_size: 
   - [3, 3, 3]
@@ -36,10 +36,10 @@ unet_use_resblock: True
 
 # optimizer
 generator:
-  name: rangerlars # sgd, adamw, rangerlars
-  base_lr: 0.001    # will be scaled by the number of GPUs, currently ban
+  name: adamw # sgd, adamw, rangerlars
+  base_lr: 0.003    # will be scaled by the number of GPUs, currently ban
   betas: [0.9, 0.999]
-  weight_decay: 0.01
+  weight_decay: 0.
   # lr_scheduler:
   warmup_epochs: 1
 
@@ -69,16 +69,21 @@ data_json_path: data/cross_validation/cross_validation_fold_0.json    # if no js
 img_centercrop_size: [448, 448, 64]
 use_patch: False
 patch_size: [448, 448, 56]   # [384, 416, 56]
-batch_size: 4
+batch_size: 2
 workers: 4
-
-# transforms
-mr_boder_pad: 10  # for considering the z-axis padding if using brain mask to crop the image
 
 
 # =======================
 # === Training ========
 # =======================
-total_epochs: 1000
+total_epochs: 2000
 save_checkpoint_freq: 4
 criterion: l1
+lambda_l1: 20.0
+lambda_ssim_3d: 5.0
+lambda_ssim_yz: 5.0
+lambda_ssim_xz: 5.0
+lambda_ssim_xy: 5.0
+
+scale_window_0_100: 0.5
+scale_window_100_1500: 0.5

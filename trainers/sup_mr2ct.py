@@ -299,8 +299,9 @@ class TranslationTrainer:
             img_size = self.config['img_centercrop_size']
             transformer_layers = self.config['transformer_layers']
             num_residual_units = self.config['num_residual_units']
+            shuffleunet_filters = self.config['shuffleunet_filters']
             self.G = ShuffleUNet(dimensions=3, in_channels=1, out_channels=1,
-                    channels=(32, 64, 128, 256, 384), 
+                    channels=shuffleunet_filters, 
                     strides=(2, 2, 2, 2),
                     kernel_size = 3, up_kernel_size = 3, num_res_units=num_residual_units, 
                     img_size=img_size, transformer_layers=transformer_layers)

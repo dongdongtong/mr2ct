@@ -122,7 +122,75 @@ class TranslationTrainer:
 
         return fake_target_images
 
+    def get_windowed_loss(self, fake_ct, ct_img, ct_brainmask):
+        window_0_100_fake_ct = torch.clamp(fake_ct, 0, 100)
+        window_0_100_ct_img = torch.clamp(ct_img, 0, 100)
+        l1_loss_window_0_100 = self.criterion(window_0_100_fake_ct, window_0_100_ct_img)
+        loss_ssims_window_0_100 = self.get_ssim_loss(window_0_100_fake_ct, window_0_100_ct_img, ct_brainmask)
+
+        window_100_1500_fake_ct = torch.clamp(fake_ct, 100, 1500)
+        window_100_1500_ct_img = torch.clamp(ct_img, 100, 1500)
+        l1_loss_window_100_1500 = self.criterion(window_100_1500_fake_ct, window_100_1500_ct_img)
+        # loss_ssims_window_100_1500 = self.get_ssim_loss(window_100_1500_fake_ct, window_100_1500_ct_img, ct_brainmask)
+
+        loss_window_0_100 = self.config['scale_window_0_100'] * (
+            self.config['lambda_l1'] * l1_loss_window_0_100 + \
+            self.config['lambda_ssim_3d'] * loss_ssims_window_0_100['loss_ssim_3d'] + \
+            self.config['lambda_ssim_yz'] * loss_ssims_window_0_100['loss_ssim_yz'] + \
+            self.config['lambda_ssim_xz'] * loss_ssims_window_0_100['loss_ssim_xz'] + \
+            self.config['lambda_ssim_xy'] * loss_ssims_window_0_100['loss_ssim_xy']
+        )
+    
+        loss_window_100_1500 = self.config['scale_window_100_1500'] * self.config['lambda_l1'] * l1_loss_window_100_1500
+
+        loss = loss_window_0_100 + loss_window_100_1500
+
+        log_loss = dict()
+        log_loss["loss_G/train_l1_loss_window_0_100"] = l1_loss_window_0_100.detach()
+        log_loss["loss_G/train_l1_loss_window_100_1500"] = l1_loss_window_100_1500.detach()
+        log_loss["loss_ssim_3d/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_3d'].detach()
+        # log_loss["loss_ssim_3d/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_3d'].detach()
+        log_loss["loss_ssim_yz/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_yz'].detach()
+        # log_loss["loss_ssim_yz/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_yz'].detach()
+        log_loss["loss_ssim_xz/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_xz'].detach()
+        # log_loss["loss_ssim_xz/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_xz'].detach()
+        log_loss["loss_ssim_xy/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_xy'].detach()
+        # log_loss["loss_ssim_xy/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_xy'].detach()
+        log_loss["loss_ssim_3d_unscaled/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_3d_unscaled'].detach()
+        # log_loss["loss_ssim_3d_unscaled/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_3d_unscaled'].detach()
+        log_loss["loss_ssim_yz_unscaled/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_yz_unscaled'].detach()
+        # log_loss["loss_ssim_yz_unscaled/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_yz_unscaled'].detach()
+        log_loss["loss_ssim_xz_unscaled/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_xz_unscaled'].detach()
+        # log_loss["loss_ssim_xz_unscaled/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_xz_unscaled'].detach()
+        log_loss["loss_ssim_xy_unscaled/train_window_0_100"] = loss_ssims_window_0_100['loss_ssim_xy_unscaled'].detach()
+        # log_loss["loss_ssim_xy_unscaled/train_window_100_1500"] = loss_ssims_window_100_1500['loss_ssim_xy_unscaled'].detach()
+        log_loss["loss_total/window_0_100_loss"] = loss_window_0_100.detach()
+        log_loss["loss_total/window_100_1500_loss"] = loss_window_100_1500.detach()
+
+        return {
+            "loss": loss,
+            "log_losses": log_loss,
+            "loss_window_0_100": loss_window_0_100,
+            "l1_loss_window_0_100": l1_loss_window_0_100,
+            "loss_ssims_window_0_100": loss_ssims_window_0_100,
+            "loss_window_100_1500": loss_window_100_1500,
+            "l1_loss_window_100_1500": l1_loss_window_100_1500,
+            # "loss_ssims_window_100_1500": loss_ssims_window_100_1500,
+        }
+
     def get_ssim_loss(self, fake_ct, ct_img, ct_brainmask):
+        if (fake_ct != fake_ct).sum() > 0:
+            print("fake_ct is nan")
+            raise Exception("fake_ct is nan")
+        
+        if (ct_img != ct_img).sum() > 0:
+            print("ct_img is nan")
+            raise Exception("ct_img is nan")
+        
+        if (ct_brainmask != ct_brainmask).sum() > 0:
+            print("ct_brainmask is nan")
+            raise Exception("ct_brainmask is nan")
+
         # we calculate the ssim loss only in the head mask region
         b, c, h, w, d = ct_img.shape
         # calculate 3D SSIM loss
@@ -138,6 +206,11 @@ class TranslationTrainer:
             head_mask = ct_brainmask.type(torch.BoolTensor).cuda()
             head_mask_sum = head_mask.view(b, -1).sum(1)
 
+            zero_mask = (fake_ct_data_range == 0) | (ct_data_range == 0)
+            non_zero_mask = ~zero_mask
+            n_non_zero_img = non_zero_mask.sum()
+            # print("3d n_non_zero_img:", n_non_zero_img)
+
         norm_fake_ct = (fake_ct - fake_ct_min.view(b, 1, 1, 1, 1)) / (fake_ct_data_range.view(b, 1, 1, 1, 1) + 1)
         norm_ct_img = (ct_img - ct_min.view(b, 1, 1, 1, 1)) / (ct_data_range.view(b, 1, 1, 1, 1) + 1)
 
@@ -149,7 +222,7 @@ class TranslationTrainer:
         # print(ssim_3d_map.shape, norm_fake_ct.shape, norm_ct_img.shape)
         ssim_3d_map = F.pad(ssim_3d_map, (5, 5, 5, 5, 5, 5), mode='constant', value=0)
         loss_ssim_3d_map = 1 - ssim_3d_map
-        loss_ssim_3d = (loss_ssim_3d_map * head_mask).view(b, -1).sum(1) / head_mask_sum
+        loss_ssim_3d = (loss_ssim_3d_map * head_mask).reshape(b, -1).sum(1) / (head_mask_sum + 1)
         with torch.no_grad():
             loss_ssim_3d_unscaled = loss_ssim_3d_map.mean()
         loss_ssim_3d = (ct_data_range * loss_ssim_3d).mean()
@@ -160,21 +233,25 @@ class TranslationTrainer:
             # ct_slices shape of (-1, h, w)
             n, h, w = fake_ct_slices.shape
             with torch.no_grad():
-                fake_ct_min_plane = (fake_ct_slices * head_mask_slices).min(dim=1)[0].min(dim=1)[0].unsqueeze(1).unsqueeze(1)
-                fake_ct_max_plane = (fake_ct_slices * head_mask_slices).max(dim=1)[0].max(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                fake_ct_min_plane = fake_ct_slices.reshape(n, -1).min(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                fake_ct_max_plane = fake_ct_slices.reshape(n, -1).max(dim=1)[0].unsqueeze(1).unsqueeze(1)
                 fake_ct_data_range_plane = fake_ct_max_plane - fake_ct_min_plane
 
-                ct_min_plane = (ct_slices * head_mask_slices).min(dim=1)[0].min(dim=1)[0].unsqueeze(1).unsqueeze(1)
-                ct_max_plane = (ct_slices * head_mask_slices).max(dim=1)[0].max(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                ct_min_plane = ct_slices.reshape(n, -1).min(dim=1)[0].unsqueeze(1).unsqueeze(1)
+                ct_max_plane = ct_slices.reshape(n, -1).max(dim=1)[0].unsqueeze(1).unsqueeze(1)
                 ct_data_range_plane = ct_max_plane - ct_min_plane
 
                 # select non-zero slices for SSIM loss to avoid zero denomiator error during normalization
-                non_zero_mask = ct_data_range_plane == 0
-                non_zero_mask = ~non_zero_mask.squeeze()
+                zero_mask = ct_data_range_plane == 0
+                non_zero_mask = ~zero_mask.squeeze()
                 n_non_zero_slices = non_zero_mask.sum()
 
                 non_zero_head_mask_slices = head_mask_slices[non_zero_mask]
                 non_zero_head_mask_slices_sum = non_zero_head_mask_slices.view(n_non_zero_slices, -1).sum(1)
+                
+                # if n_non_zero_slices == 0:
+                #     return torch.tensor(0.0).cuda(), torch.tensor(0.0).cuda()
+                # print("2d n_non_zero_slices:", n_non_zero_slices)
 
             # print(fake_ct_slices.shape, ct_slices.shape, non_zero_mask.sum())
             norm_fake_ct_slices = (fake_ct_slices[non_zero_mask] - fake_ct_min_plane[non_zero_mask]) / (fake_ct_data_range_plane[non_zero_mask] + 1)
@@ -190,7 +267,7 @@ class TranslationTrainer:
             ssim_plane_map = F.pad(ssim_plane_map, (5, 5, 5, 5), mode='constant', value=0)
             
             loss_ssim_plane_map = 1 - ssim_plane_map
-            loss_ssim_plane = (loss_ssim_plane_map * non_zero_head_mask_slices).view(n_non_zero_slices, -1).sum(1) / non_zero_head_mask_slices_sum
+            loss_ssim_plane = (loss_ssim_plane_map * non_zero_head_mask_slices).view(n_non_zero_slices, -1).sum(1) / (non_zero_head_mask_slices_sum + 1)
             with torch.no_grad():
                 loss_ssim_plane_unscaled = loss_ssim_plane_map.mean()
             # print(ssim_plane_map.shape, ct_data_range_plane[non_zero_mask].shape, non_zero_mask.sum(), n, loss_ssim_plane.shape)
@@ -242,6 +319,7 @@ class TranslationTrainer:
         
         G_loss = AverageMeter()
         ssim_loss = AverageMeter()
+        window_loss = AverageMeter()
 
         for idx, batch in enumerate(train_loader):
             log_losses = dict()
@@ -265,12 +343,10 @@ class TranslationTrainer:
                     self.config['lambda_ssim_yz'] * loss_ssim_dict['loss_ssim_yz'] + \
                     self.config['lambda_ssim_xz'] * loss_ssim_dict['loss_ssim_xz'] + \
                     self.config['lambda_ssim_xy'] * loss_ssim_dict['loss_ssim_xy']
-                # loss_ssim = self.G.learnable_ssim_lambda_3d * loss_ssim_dict['loss_ssim_3d'] + \
-                #             self.G.learnable_ssim_lambda_2d_yz * loss_ssim_dict['loss_ssim_yz'] + \
-                #             self.G.learnable_ssim_lambda_2d_xz * loss_ssim_dict['loss_ssim_xz'] + \
-                #             self.G.learnable_ssim_lambda_2d_xy * loss_ssim_dict['loss_ssim_xy']
+                
+                windowed_loss_dict = self.get_windowed_loss(fake_ct, ct_img, ct_brain_mask)
 
-                loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim
+                loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']
                 
                 loss_G.backward()
             else:
@@ -284,13 +360,11 @@ class TranslationTrainer:
                             self.config['lambda_ssim_yz'] * loss_ssim_dict['loss_ssim_yz'] + \
                             self.config['lambda_ssim_xz'] * loss_ssim_dict['loss_ssim_xz'] + \
                             self.config['lambda_ssim_xy'] * loss_ssim_dict['loss_ssim_xy']
-                    # loss_ssim = self.G.learnable_ssim_lambda_3d * loss_ssim_dict['loss_ssim_3d'] + \
-                    #         self.G.learnable_ssim_lambda_2d_yz * loss_ssim_dict['loss_ssim_yz'] + \
-                    #         self.G.learnable_ssim_lambda_2d_xz * loss_ssim_dict['loss_ssim_xz'] + \
-                    #         self.G.learnable_ssim_lambda_2d_xy * loss_ssim_dict['loss_ssim_xy']
 
-                    loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim
+                    windowed_loss_dict = self.get_windowed_loss(fake_ct, ct_img, ct_brain_mask)
 
+                    loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']
+                    
                     self.scaler.scale(loss_G).backward()
             
             # for name, param in self.G.named_parameters():
@@ -318,24 +392,25 @@ class TranslationTrainer:
             log_losses['loss_ssim_xz_unscaled/train'] = loss_ssim_dict['loss_ssim_xz_unscaled'].detach()
             log_losses['loss_ssim_xy_unscaled/train'] = loss_ssim_dict['loss_ssim_xy_unscaled'].detach()
             log_losses['loss_total/train'] = loss_G.detach()
-            # log_losses['learnable_ssim_lambda_3d'] = self.G.learnable_ssim_lambda_3d.detach()
-            # log_losses['learnable_ssim_lambda_2d_yz'] = self.G.learnable_ssim_lambda_2d_yz.detach()
-            # log_losses['learnable_ssim_lambda_2d_xz'] = self.G.learnable_ssim_lambda_2d_xz.detach()
-            # log_losses['learnable_ssim_lambda_2d_xy'] = self.G.learnable_ssim_lambda_2d_xy.detach()
+            log_losses.update(windowed_loss_dict['log_losses'])
                 
             if (idx + 1) % self.gradient_accumulation_step == 0 or (idx + 1) == len(train_loader):
                 if self.ddp:
-                    loss_list = distributed_all_gather([loss_G, loss_ssim], out_numpy=True, is_valid=idx < len(train_loader))
+                    loss_list = distributed_all_gather([loss_G, loss_ssim, windowed_loss_dict['loss']], out_numpy=True, is_valid=idx < len(train_loader))
                     G_loss.update(
                         np.mean(loss_list[0], axis=0), n=self.config['batch_size'] * self.world_size * self.gradient_accumulation_step
                     )
                     ssim_loss.update(
                         np.mean(loss_list[1], axis=0), n=self.config['batch_size'] * self.world_size * self.gradient_accumulation_step
                     )
+                    window_loss.update(
+                        np.mean(loss_list[2], axis=0), n=self.config['batch_size'] * self.world_size * self.gradient_accumulation_step
+                    )
 
                 else:
                     G_loss.update(loss_G.detach().cpu().numpy().mean(), n=self.config['batch_size'] * self.gradient_accumulation_step)
                     ssim_loss.update(loss_ssim.detach().cpu().numpy().mean(), n=self.config['batch_size'] * self.gradient_accumulation_step)
+                    window_loss.update(windowed_loss_dict['loss'].detach().cpu().numpy().mean(), n=self.config['batch_size'] * self.gradient_accumulation_step)
 
                 if self.local_rank == 0:
                     logger.info(f"Epoch {self.epoch}/{self.config['total_epochs']} {idx}/{len(train_loader)} loss_G: {G_loss.avg:.4f} loss_ssim: {ssim_loss.avg:.4f}")
@@ -377,14 +452,24 @@ class TranslationTrainer:
         loss = AverageMeter()
         loss_l1_ = AverageMeter()
         loss_ssim_ = AverageMeter()
-        loss_ssim_3d = AverageMeter()
-        loss_ssim_yz = AverageMeter()
-        loss_ssim_xz = AverageMeter()
-        loss_ssim_xy = AverageMeter()
         loss_ssim_3d_unscaled = AverageMeter()
         loss_ssim_yz_unscaled = AverageMeter()
         loss_ssim_xz_unscaled = AverageMeter()
         loss_ssim_xy_unscaled = AverageMeter()
+
+        window_0_100_loss = AverageMeter()
+        window_0_100_loss_l1 = AverageMeter()
+        window_0_100_loss_ssim_3d_unscaled = AverageMeter()
+        window_0_100_loss_ssim_yz_unscaled = AverageMeter()
+        window_0_100_loss_ssim_xz_unscaled = AverageMeter()
+        window_0_100_loss_ssim_xy_unscaled = AverageMeter()
+
+        window_100_1500_loss = AverageMeter()
+        window_100_1500_loss_l1 = AverageMeter()
+        # window_100_1500_loss_ssim_3d_unscaled = AverageMeter()
+        # window_100_1500_loss_ssim_yz_unscaled = AverageMeter()
+        # window_100_1500_loss_ssim_xz_unscaled = AverageMeter()
+        # window_100_1500_loss_ssim_xy_unscaled = AverageMeter()
         
         for i in tqdm(range(len(val_ds))):
             images = val_ds.__getitem__(i)
@@ -409,34 +494,56 @@ class TranslationTrainer:
                     self.config['lambda_ssim_yz'] * loss_ssim_dict['loss_ssim_yz'] + \
                     self.config['lambda_ssim_xz'] * loss_ssim_dict['loss_ssim_xz'] + \
                     self.config['lambda_ssim_xy'] * loss_ssim_dict['loss_ssim_xy']
+            
+            windowed_loss_dict = self.get_windowed_loss(fake_ct, ct_img, ct_brainmask)
 
-            loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim
+            loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']
 
             loss.update(loss_G.item(), n=1)
             loss_l1_.update(loss_l1.item(), n=1)
             loss_ssim_.update(loss_ssim.item(), n=1)
-            loss_ssim_3d.update(loss_ssim_dict['loss_ssim_3d'].item(), n=1)
-            loss_ssim_yz.update(loss_ssim_dict['loss_ssim_yz'].item(), n=1)
-            loss_ssim_xz.update(loss_ssim_dict['loss_ssim_xz'].item(), n=1)
-            loss_ssim_xy.update(loss_ssim_dict['loss_ssim_xy'].item(), n=1)
             loss_ssim_3d_unscaled.update(loss_ssim_dict['loss_ssim_3d_unscaled'].item(), n=1)
             loss_ssim_yz_unscaled.update(loss_ssim_dict['loss_ssim_yz_unscaled'].item(), n=1)
             loss_ssim_xz_unscaled.update(loss_ssim_dict['loss_ssim_xz_unscaled'].item(), n=1)
             loss_ssim_xy_unscaled.update(loss_ssim_dict['loss_ssim_xy_unscaled'].item(), n=1)
-        
+
+            window_0_100_loss.update(windowed_loss_dict['loss_window_0_100'].item(), n=1)
+            window_0_100_loss_l1.update(windowed_loss_dict['l1_loss_window_0_100'].item(), n=1)
+            window_0_100_loss_ssim_3d_unscaled.update(windowed_loss_dict['loss_ssims_window_0_100']['loss_ssim_3d_unscaled'].item(), n=1)
+            window_0_100_loss_ssim_yz_unscaled.update(windowed_loss_dict['loss_ssims_window_0_100']['loss_ssim_yz_unscaled'].item(), n=1)
+            window_0_100_loss_ssim_xz_unscaled.update(windowed_loss_dict['loss_ssims_window_0_100']['loss_ssim_xz_unscaled'].item(), n=1)
+            window_0_100_loss_ssim_xy_unscaled.update(windowed_loss_dict['loss_ssims_window_0_100']['loss_ssim_xy_unscaled'].item(), n=1)
+
+            window_100_1500_loss.update(windowed_loss_dict['loss_window_100_1500'].item(), n=1)
+            window_100_1500_loss_l1.update(windowed_loss_dict['l1_loss_window_100_1500'].item(), n=1)
+            # window_100_1500_loss_ssim_3d_unscaled.update(windowed_loss_dict['loss_ssims_window_100_1500']['loss_ssim_3d_unscaled'].item(), n=1)
+            # window_100_1500_loss_ssim_yz_unscaled.update(windowed_loss_dict['loss_ssims_window_100_1500']['loss_ssim_yz_unscaled'].item(), n=1)
+            # window_100_1500_loss_ssim_xz_unscaled.update(windowed_loss_dict['loss_ssims_window_100_1500']['loss_ssim_xz_unscaled'].item(), n=1)
+            # window_100_1500_loss_ssim_xy_unscaled.update(windowed_loss_dict['loss_ssims_window_100_1500']['loss_ssim_xy_unscaled'].item(), n=1)
+
         if self.local_rank == 0:
             log_losses = dict()
             log_losses['loss_G/val'] = loss_l1_.avg
             log_losses['loss_ssim/val'] = loss_ssim_.avg
-            log_losses['loss_ssim_3d/val'] = loss_ssim_3d.avg
-            log_losses['loss_ssim_yz/val'] = loss_ssim_yz.avg
-            log_losses['loss_ssim_xz/val'] = loss_ssim_xz.avg
-            log_losses['loss_ssim_xy/val'] = loss_ssim_xy.avg
             log_losses['loss_ssim_3d_unscaled/val'] = loss_ssim_3d_unscaled.avg
             log_losses['loss_ssim_yz_unscaled/val'] = loss_ssim_yz_unscaled.avg
             log_losses['loss_ssim_xz_unscaled/val'] = loss_ssim_xz_unscaled.avg
             log_losses['loss_ssim_xy_unscaled/val'] = loss_ssim_xy_unscaled.avg
             log_losses['loss_total/val'] = loss.avg
+
+            log_losses['loss_G/val_window_0_100'] = window_0_100_loss_l1.avg
+            log_losses['loss_ssim_3d_unscaled/val_window_0_100'] = window_0_100_loss_ssim_3d_unscaled.avg
+            log_losses['loss_ssim_yz_unscaled/val_window_0_100'] = window_0_100_loss_ssim_yz_unscaled.avg
+            log_losses['loss_ssim_xz_unscaled/val_window_0_100'] = window_0_100_loss_ssim_xz_unscaled.avg
+            log_losses['loss_ssim_xy_unscaled/val_window_0_100'] = window_0_100_loss_ssim_xy_unscaled.avg
+            log_losses['loss_total/val_window_0_100'] = window_0_100_loss.avg
+
+            log_losses['loss_G/val_window_100_1500'] = window_100_1500_loss_l1.avg
+            # log_losses['loss_ssim_3d_unscaled/val_window_100_1500'] = window_100_1500_loss_ssim_3d_unscaled.avg
+            # log_losses['loss_ssim_yz_unscaled/val_window_100_1500'] = window_100_1500_loss_ssim_yz_unscaled.avg
+            # log_losses['loss_ssim_xz_unscaled/val_window_100_1500'] = window_100_1500_loss_ssim_xz_unscaled.avg
+            # log_losses['loss_ssim_xy_unscaled/val_window_100_1500'] = window_100_1500_loss_ssim_xy_unscaled.avg
+            log_losses['loss_total/val_window_100_1500'] = window_100_1500_loss.avg
 
             self.visual.plot_current_errors(log_losses, (self.epoch + 1) * self.num_batches)
 

@@ -79,11 +79,13 @@ class AdjustCTValuesd(transforms.transform.MapTransform, InvertibleTransform):
         if monai.__version__ >= "1.0.0":
             # monai version is greater than or equal to 1.0.0
 
-            image_array = torch.clamp(image_array, -1024, max=torch.quantile(image_array, 0.9999))
+            image_array = torch.clamp(image_array, -1024, max=3000)
+            # image_array += 1024
             # image_array[image_array < -1024] = -1024
         else:
             # monai version is less than 1.0.0
-            image_array = np.clip(image_array, a_min=-1024, a_max=np.percentile(image_array, 99.99))
+            image_array = np.clip(image_array, a_min=-1024, a_max=3000)
+            # image_array += 1024
             # image_array[image_array < -1024] = -1024
         
         return image_array
@@ -149,8 +151,10 @@ def get_train_transforms(cfg):
     patch_size = cfg['patch_size']
 
     use_patch = cfg.get('use_patch', True)
+
+    patch_n = cfg.get('patch_n', 2)
     
-    need_keys = ["mr_image", "ct_image"]
+    need_keys = ["mr_image", "ct_image", "ct_brainmask"]
     
     train_transforms = [
         transforms.LoadImaged(keys=need_keys),
@@ -158,7 +162,7 @@ def get_train_transforms(cfg):
         transforms.Orientationd(keys=need_keys, axcodes="RAS"),
         transforms.Spacingd(keys=need_keys, pixdim=(0.5, 0.5, 3.0)),
         transforms.CropForegroundd(keys=need_keys, source_key="mr_image"),   # crop to align the brain center into the image center
-        transforms.ResizeWithPadOrCropd(keys=need_keys, spatial_size=img_centercrop_size, mode=["edge", "edge"]),
+        transforms.ResizeWithPadOrCropd(keys=need_keys, spatial_size=img_centercrop_size, mode=["edge", "edge", "constant"]),
         # transforms.Resized(keys=need_keys, spatial_size=resize_size),
         transforms.HistogramNormalized(keys=['mr_image'], min=0., max=1.0),
         AdjustCTValuesd(keys=['ct_image']),
@@ -183,7 +187,7 @@ def get_train_transforms(cfg):
 
     # random patch sampling
     patchlize_transforms = [
-        transforms.RandSpatialCropSamplesd(keys=need_keys, roi_size=patch_size, num_samples=2, random_center=True),
+        transforms.RandSpatialCropSamplesd(keys=need_keys, roi_size=patch_size, num_samples=patch_n, random_center=True),
         # transforms.ToTensord(keys=need_keys),
     ]
 
@@ -200,7 +204,7 @@ def get_valid_transforms(cfg):
     patch_size = cfg['patch_size']
 
     
-    need_keys = ["mr_image", "ct_image"]
+    need_keys = ["mr_image", "ct_image", "ct_brainmask"]
     
     train_transforms = [
         transforms.LoadImaged(keys=need_keys),
@@ -208,7 +212,7 @@ def get_valid_transforms(cfg):
         transforms.Orientationd(keys=need_keys, axcodes="RAS"),
         transforms.Spacingd(keys=need_keys, pixdim=(0.5, 0.5, 3.0)),
         transforms.CropForegroundd(keys=need_keys, source_key="mr_image"),   # crop to align the brain center into the image center
-        transforms.ResizeWithPadOrCropd(keys=need_keys, spatial_size=img_centercrop_size, mode=["edge", "edge"]),
+        transforms.ResizeWithPadOrCropd(keys=need_keys, spatial_size=img_centercrop_size, mode=["edge", "edge", "constant"]),
         # transforms.Resized(keys=need_keys, spatial_size=resize_size),
         transforms.HistogramNormalized(keys=['mr_image'], min=-1, max=1.0),
         AdjustCTValuesd(keys=['ct_image']),

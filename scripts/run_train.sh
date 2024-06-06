@@ -63,13 +63,25 @@ export CUDA_VISIBLE_DEVICES="$gpu_ids"
 #     # --amp
 
 
-# add ssim loss
+# # add ssim loss
+# python3 scripts/train_sup.py \
+#     --config configs/mr2ct_supervise_transformer_ssim.yml \
+#     --trainer sup_mr2ct_no_patch_ssim \
+#     --fold 0 \
+#     --gradient_accumulation_step 1 \
+#     --load_weights \
+#     --resume \
+#     --resume_path runs/mr2ct_supervise_transformer/no_weight_decay/model_best.pt \
+#     # --amp
+
+
+# add windowed ssim loss
 python3 scripts/train_sup.py \
-    --config configs/mr2ct_supervise_transformer_ssim.yml \
-    --trainer sup_mr2ct_no_patch_ssim \
+    --config configs/mr2ct_supervise_transformer_windowed_ssim.yml \
+    --trainer sup_mr2ct_no_patch_windowed \
     --fold 0 \
     --gradient_accumulation_step 1 \
     --load_weights \
     --resume \
-    --resume_path runs/mr2ct_supervise_transformer_ssim/2/model_best.pt \
+    --resume_path runs/mr2ct_supervise_transformer/no_weight_decay/model_best.pt \
     # --amp

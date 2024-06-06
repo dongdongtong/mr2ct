@@ -11,8 +11,8 @@ mr_dir = os.path.join(data_root_dir, "mr")
 ct_files = os.listdir(ct_dir)
 
 # Retrieve the same filename in the mr subdir
-mr_files = [os.path.join(mr_dir, file) for file in ct_files]
-ct_files = [os.path.join(ct_dir, file) for file in ct_files]
+mr_files = [os.path.join(mr_dir, file) for file in ct_files if "brainmask" not in basename(file)]
+ct_files = [os.path.join(ct_dir, file) for file in ct_files if "brainmask" not in basename(file)]
 
 # Combine the ct and mr file paths
 aligned_data_paths = list(zip(ct_files, mr_files))
@@ -27,10 +27,13 @@ for fold_i, (train_index, test_index) in enumerate(kfold.split(aligned_data_path
     test_data_json = []
 
     for ct_file, mr_file in train_data:
-        train_data_json.append({"ct_image": ct_file, "mr_image": mr_file, })
+        train_data_json.append(
+            {"ct_image": ct_file, 
+             "mr_image": mr_file, 
+             "ct_brainmask": ct_file.replace('.nii.gz', '_brainmask.nii.gz'),})
     
     for ct_file, mr_file in test_data:
-        test_data_json.append({"ct_image": ct_file, "mr_image": mr_file})
+        test_data_json.append({"ct_image": ct_file, "mr_image": mr_file, "ct_brainmask": ct_file.replace('.nii.gz', '_brainmask.nii.gz')})
 
     data_json = {
         "numTraining": len(train_data_json),

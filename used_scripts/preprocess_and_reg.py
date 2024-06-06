@@ -76,6 +76,7 @@ def do_prep_aligned_ct_mr(ct_file, out_root_dir):
     else:
         print(f"CT preprocess already processed {fn}")
     ct_img_pre = ants.image_read(out_ct_file)
+    ct_brainmask = ants.image_read(out_ct_file.replace('.nii.gz', '_brainmask.nii.gz'))
     
     if not os.path.exists(out_mr_file) or not os.path.exists(out_mr_file.replace('.nii.gz', '_brainmask.nii.gz')):
         do_prep_mr(mr_file, out_mr_file)
@@ -90,17 +91,29 @@ def do_prep_aligned_ct_mr(ct_file, out_root_dir):
         aff_metric='mattes',
     )
 
-    # apply the affine matrix to the preprocessed ct image
-    reged_ct = ants.apply_transforms(
-        fixed=mr_img_pre, 
-        moving=ct_img_pre, 
-        transformlist=out_dict['fwdtransforms'],
-        interpolator='bSpline', defaultvalue=-1024)
+    # # apply the affine matrix to the preprocessed ct image
+    # reged_ct = ants.apply_transforms(
+    #     fixed=mr_img_pre, 
+    #     moving=ct_img_pre, 
+    #     transformlist=out_dict['fwdtransforms'],
+    #     interpolator='bSpline', defaultvalue=-1024)
 
-    reg_ct_dir = join(out_root_dir, "ct_reg2_mr")
-    os.makedirs(reg_ct_dir, exist_ok=True)
-    reg_ct_file = join(reg_ct_dir, fn)
-    ants.image_write(reged_ct, reg_ct_file)
+    # reg_ct_dir = join(out_root_dir, "ct_reg2_mr")
+    # os.makedirs(reg_ct_dir, exist_ok=True)
+    # reg_ct_file = join(reg_ct_dir, fn)
+    # ants.image_write(reged_ct, reg_ct_file)
+
+    # apply the affine matrix to the brain mask
+    reged_ct_brainmask = ants.apply_transforms(
+        fixed=mr_img_pre, 
+        moving=ct_brainmask, 
+        transformlist=out_dict['fwdtransforms'],
+        interpolator='nearestNeighbor', defaultvalue=0)
+    
+    reg_ct_brainmask_dir = join(out_root_dir, "ct_reg2_mr_brainmask")
+    os.makedirs(reg_ct_brainmask_dir, exist_ok=True)
+    reg_ct_brainmask_file = join(reg_ct_brainmask_dir, fn.replace('.nii.gz', '_brainmask.nii.gz'))
+    ants.image_write(reged_ct_brainmask, reg_ct_brainmask_file)
 
 
 def main():

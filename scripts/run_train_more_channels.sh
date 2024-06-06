@@ -20,15 +20,15 @@ export CUDA_VISIBLE_DEVICES="$gpu_ids"
 #     --amp
 
 
-# python3 scripts/train_sup.py \
-#     --config configs/mr2ct_supervise.yml \
-#     --trainer sup_mr2ct \
-#     --fold 0 \
-#     --gradient_accumulation_step 1 \
-#     # --load_weights \
-#     # --resume \
-#     # --resume_path runs/mr2ct_supervise/shuffleunet_patch_size_256_256_32_no_amp/model_best.pt
-#     # --amp
+python3 scripts/train_sup.py \
+    --config configs/mr2ct_supervise.yml \
+    --trainer sup_mr2ct \
+    --fold 0 \
+    --gradient_accumulation_step 1 \
+    # --load_weights \
+    # --resume \
+    # --resume_path runs/mr2ct_supervise/shuffleunet_patch_size_256_256_32_no_amp/model_best.pt
+    # --amp
 
 # python3 scripts/train_sup.py \
 #     --config configs/mr2ct_supervise_larger_patch.yml \

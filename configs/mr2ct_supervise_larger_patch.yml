@@ -12,6 +12,7 @@ in_channel: 1   # in_channel is the same as the out_channel in cyclegan
 model_name: shuffleunet  # shuffleunet, unet
 transformer_layers: 0
 num_residual_units: 0
+shuffleunet_filters: [64, 128, 256, 384, 768]
 filters: [64, 96, 128, 192, 256, 384, 512, 768, 1024]  # filters reference from Optimized U-Net for Brain Tumor Segmentation <https://arxiv.org/pdf/2110.03352.pdf>
 kernel_size: 
   - [3, 3, 3]
@@ -36,11 +37,11 @@ unet_use_resblock: True
 # optimizer
 generator:
   name: rangerlars # sgd, adamw, rangerlars
-  base_lr: 0.001    # will be scaled by the number of GPUs, currently ban
+  base_lr: 0.003    # will be scaled by the number of GPUs, currently ban
   betas: [0.9, 0.999]
   weight_decay: 0.
   # lr_scheduler:
-  warmup_epochs: 10
+  warmup_epochs: 1
 
 # =======================
 # === Datasets ========
@@ -66,6 +67,7 @@ data_root_dir: data
 image_subfolder_name: ct_reg2_mr_betneck          # contains the mr and ct subfolders
 data_json_path: data/cross_validation/cross_validation_fold_0.json    # if no json found in this path, it will be created in training
 img_centercrop_size: [448, 448, 56]
+use_patch: True
 patch_size: [384, 384, 48]   # [384, 416, 56]
 batch_size: 2
 workers: 4
@@ -77,6 +79,6 @@ mr_boder_pad: 10  # for considering the z-axis padding if using brain mask to cr
 # =======================
 # === Training ========
 # =======================
-total_epochs: 500
+total_epochs: 1000
 save_checkpoint_freq: 20
 criterion: l1

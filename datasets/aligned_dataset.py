@@ -43,6 +43,9 @@ class AlignedDataset(Dataset):
             mr_tensor = data_dict['mr_image']
             ct_tensor = data_dict['ct_image']
             new_dict = {'mr_image': mr_tensor, 'ct_image': ct_tensor}
+            ct_brainmask = data_dict.get('ct_brainmask', None)
+            if ct_brainmask is not None:
+                new_dict['ct_brainmask'] = ct_brainmask.type(torch.LongTensor)
 
             new_dict['mr_img_path'] = mr_img_path
             new_dict['ct_img_path'] = ct_img_path
@@ -83,6 +86,9 @@ class AlignedDatasetCache(CacheDataset):
             mr_tensor = data_dict['mr_image']
             ct_tensor = data_dict['ct_image']
             new_dict = {'mr_image': mr_tensor, 'ct_image': ct_tensor}
+            ct_brainmask = data_dict.get('ct_brainmask', None)
+            if ct_brainmask is not None:
+                new_dict['ct_brainmask'] = ct_brainmask.type(torch.LongTensor)
 
             new_dict['mr_img_path'] = mr_img_path
             new_dict['ct_img_path'] = ct_img_path

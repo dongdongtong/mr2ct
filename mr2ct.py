@@ -12,14 +12,14 @@ from utils.infer_funcs import do_mr_to_pct
 
 
 input_mr_path = "./MAGUIXIA_0000.nii.gz"
-out_pseudo_ct_path = "./MAGUIXIA_0000_pseudo_ct_transformer.nii.gz"
+out_pseudo_ct_path = "./valid_MAGUIXIA_0000_pseudo_ct_pad_minus1024_window_loss.nii.gz"
 
 # transformer + L1 loss
 # pretrained_model_path = "runs/mr2ct_supervise_transformer/no_weight_decay/model_best.pt"
 # state_dict = torch.load(pretrained_model_path)['G']
 
 # transformer + L1 loss + SSIM loss
-pretrained_model_path = "runs/mr2ct_supervise_transformer_ssim/2/model_best.pt"
+pretrained_model_path = "runs/mr2ct_supervise_transformer_windowed_ssim/14/model_best.pt"
 state_dict = torch.load(pretrained_model_path)['G']
 
 # pretrained_model_path = "runs/mr2ct_supervise_larger_patch/1/model_best.pt"
@@ -34,3 +34,39 @@ do_mr_to_pct(
     transformer_layers=3, 
     img_size=(448, 448, 64)
 )
+
+
+# json_path = "data/cross_validation/cross_validation_fold_0.json"
+# output_data_dir = "data/ct_reg2_mr_betneck/transformed_data"
+
+
+# import json
+# from shutil import copyfile
+# from tqdm import tqdm
+# with open(json_path) as f:
+#     data = json.load(f)
+
+# test_data = data['validation']
+
+# for case_idx, case in enumerate(tqdm(test_data)):
+#     mr_path = case['mr_image']
+#     ct_path = case['ct_image']
+#     mr_name = basename(mr_path).split(".nii")[0]
+#     ct_name = basename(ct_path).split(".nii")[0]
+
+#     out_dir = join(output_data_dir, str(case_idx))
+#     os.makedirs(out_dir, exist_ok=True)
+
+#     copyfile(mr_path, join(out_dir, f"mr.nii.gz"))
+#     copyfile(ct_path, join(out_dir, f"ct.nii.gz"))
+
+#     pct_path = join(out_dir, f"pseudo_ct.nii.gz")
+#     do_mr_to_pct(
+#         input_mr_file=mr_path, 
+#         output_pct_file=pct_path, 
+#         saved_model=state_dict, 
+#         device="cuda", prep_t1=False,
+#         sliding_window_infer=False,
+#         transformer_layers=3, 
+#         img_size=(448, 448, 64)
+#     )
