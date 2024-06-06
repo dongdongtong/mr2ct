@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # written by: Dr. Shaodong Ding 2024-05-30
+# we add the -1024 padding during the inverse transformation of fake_ct to mr space (actually in the window loss version).
 # mr2ct, folder, or file path
 
 import os
