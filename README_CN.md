@@ -140,4 +140,4 @@ pip install -r requirements.txt
 ```
 
 ## Acknowledgements
-This project used [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md) for model development of head mask extraction and [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping. Thanks to the authors of these tools.
+This project used [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md) for model development of CT head mask extraction and [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping. Thanks to the authors of these tools.
