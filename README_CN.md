@@ -115,3 +115,10 @@ python mr2ct_t12ct_multistage_eval.py
 对模型进行评估。本脚本会直接加载之前训练的各个阶段的模型，也加载MR数据的验证集（存储在`data/mr2ct_cyclegan.json`文件中），进行模型评估。
 
 评估指标主要有CT值各HU范围内的平均绝对误差MAE。
+
+
+## Environment Requirements
+一些必要的安装包可以参考这里，若安装失败，需手动安装：
+```
+pip install -r requirements.txt
+```

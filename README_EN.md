@@ -113,3 +113,10 @@ python mr2ct_t12ct_multistage_eval.py
 for model evaluation. This script will directly load previously trained models from various stages and also load the MR data validation set (stored in the `data/mr2ct_cyclegan.json` file) for model evaluation.
 
 The evaluation metrics mainly include Mean Absolute Error (MAE) for CT values within various HU ranges.
+
+
+## Environment Requirements
+Some necessary installation packages can be found here. If installation fails, you may need to install them manually:
+```
+pip install -r requirements.txt
+```
