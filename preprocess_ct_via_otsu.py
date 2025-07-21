@@ -44,9 +44,11 @@ def apply_otsu_to_each_slice(input_image_path, output_image_path):
     
     # Convert the list of processed slices to a numpy array
     processed_array = np.array(processed_slices)
+    processed_array[processed_array > 0] = 1  # Ensure binary values (0 or 1)
     
     # Convert the numpy array back to a SimpleITK image
     processed_image = be.array2image(processed_array, input_image)
+    sitk.WriteImage(processed_image, output_image_path.replace(".nii.gz", "_otsu.nii.gz"))
 
     # mask the CT image
     processed_image = sitk.Mask(input_image, processed_image)
@@ -57,7 +59,7 @@ def apply_otsu_to_each_slice(input_image_path, output_image_path):
     print("Otsu thresholding applied to each axial slice. Resulting image saved as:", output_image_path)
 
 # Example usage
-input_image_path = "data/pipeline_niigz_betneck/ct/BICHENQIONG_0000.nii.gz"  # Replace with the path to your input CT image
+input_image_path = "/data/dingsd/mr2ct/data/ct_reg2_mr_betneck/original_ct_betneck/LUFA_0000.nii.gz"  # Replace with the path to your input CT image
 output_image_path = "./BICHENQIONG_0000_otsuonslice_erode_2.nii.gz"  # Specify the path for the output segmented image
 
 apply_otsu_to_each_slice(input_image_path, output_image_path)

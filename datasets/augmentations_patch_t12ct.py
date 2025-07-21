@@ -155,12 +155,14 @@ def get_train_transforms(cfg):
     patch_n = cfg.get('patch_n', 2)
     
     need_keys = ["mr_image", "ct_image", "ct_brainmask", "ct_skullstrip_mask"]
+
+    pix_dim = cfg.get('pix_dim', (1.0, 1.0, 1.0))
     
     train_transforms = [
         transforms.LoadImaged(keys=need_keys),
         transforms.EnsureChannelFirstd(keys=need_keys),
         transforms.Orientationd(keys=need_keys, axcodes="RAS"),
-        transforms.Spacingd(keys=need_keys, pixdim=(0.5, 0.5, 3.0)),
+        transforms.Spacingd(keys=need_keys, pixdim=pix_dim, mode=("bilinear", "bilinear", "nearest", "nearest")),
         transforms.CropForegroundd(keys=need_keys, source_key="mr_image"),   # crop to align the brain center into the image center
         transforms.ResizeWithPadOrCropd(keys=need_keys, spatial_size=img_centercrop_size, mode=["edge", "edge", "constant", "constant"]),
         # transforms.Resized(keys=need_keys, spatial_size=resize_size),
@@ -192,10 +194,11 @@ def get_train_transforms(cfg):
         # transforms.ToTensord(keys=need_keys),
     ]
 
-    train_transforms.extend(spatial_transforms)
-    train_transforms.extend(intensity_transforms)
     if use_patch:
         train_transforms.extend(patchlize_transforms)
+
+    train_transforms.extend(spatial_transforms)
+    train_transforms.extend(intensity_transforms)
 
     return transforms.Compose(train_transforms)
 
@@ -204,14 +207,15 @@ def get_valid_transforms(cfg):
     img_centercrop_size = cfg['img_centercrop_size']
     patch_size = cfg['patch_size']
 
-    
     need_keys = ["mr_image", "ct_image", "ct_brainmask", "ct_skullstrip_mask"]
+
+    pix_dim = cfg.get('pix_dim', (1.0, 1.0, 1.0))
     
     train_transforms = [
         transforms.LoadImaged(keys=need_keys),
         transforms.EnsureChannelFirstd(keys=need_keys),
         transforms.Orientationd(keys=need_keys, axcodes="RAS"),
-        transforms.Spacingd(keys=need_keys, pixdim=(0.5, 0.5, 3.0)),
+        transforms.Spacingd(keys=need_keys, pixdim=pix_dim, mode=("bilinear", "bilinear", "nearest", "nearest")),
         transforms.CropForegroundd(keys=need_keys, source_key="mr_image"),   # crop to align the brain center into the image center
         transforms.ResizeWithPadOrCropd(keys=need_keys, spatial_size=img_centercrop_size, mode=["edge", "edge", "constant", "constant"]),
         # transforms.Resized(keys=need_keys, spatial_size=resize_size),

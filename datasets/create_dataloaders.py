@@ -13,6 +13,7 @@ from datasets.sampler import Sampler
 from datasets.aligned_dataset import AlignedDataset, AlignedDatasetCache
 import datasets.augmentations_aligned as aug_cyclegan
 import datasets.augmentations_patch as aug_sup
+import datasets.augmentations_patch_t12ct as aug_sup_t12ct
 
 from monai.data.dataset import CacheDataset
 
@@ -166,14 +167,14 @@ def create_patch_loader(args, rank, tune_param=False, **kwargs):
     training_json = data_json['training']
     val_json = data_json['validation']
 
-    train_tfs = aug_sup.get_train_transforms(config)
-    valid_tfs = aug_sup.get_valid_transforms(config)
+    train_tfs = aug_sup_t12ct.get_train_transforms(config)
+    valid_tfs = aug_sup_t12ct.get_valid_transforms(config)
     
     # train_ds = AlignedDataset(training_json, train_tfs)
     # valid_ds = AlignedDataset(val_json, valid_tfs)
 
-    train_ds = AlignedDatasetCache(training_json, train_tfs, cache_num=len(training_json), num_workers=8)
-    valid_ds = AlignedDatasetCache(val_json, valid_tfs, cache_num=len(val_json), num_workers=4)
+    train_ds = AlignedDatasetCache(training_json, train_tfs, cache_num=len(training_json), num_workers=17)
+    valid_ds = AlignedDatasetCache(val_json, valid_tfs, cache_num=len(val_json), num_workers=5)
         
     g = torch.Generator()
     g.manual_seed(random_seed + rank)  # cause we're not using DDP, so the rank is just equals to 0.
@@ -192,8 +193,9 @@ def create_patch_loader(args, rank, tune_param=False, **kwargs):
         # pin_memory=True,
         generator=g,
         worker_init_fn=worker_init_fn,
+        prefetch_factor=4,
         # shuffle=False,
-        # persistent_workers=True,
+        persistent_workers=True,
         # collate_fn=data.utils.pad_list_data_collate,
     )
     

@@ -25,9 +25,9 @@ from monai.data import MetaTensor
 
 # define patch-based inference function
 # patches are 256 x 256 x 32 (i.e. 32 slices in axial/transverse plane)
-def do_inference_3D_sliding_window(net, x, patch_size=(384,384,48)):
+def do_inference_3D_sliding_window(net, x, patch_size=(576,576,64)):
     sliding_window_infer = monai.inferers.inferer.SlidingWindowInferer(
-        roi_size=patch_size, sw_batch_size=1, overlap=0.5
+        roi_size=patch_size, sw_batch_size=1, overlap=0.5, mode="gaussian"
     )
 
     out_tensor = sliding_window_infer(x, net)
@@ -237,11 +237,11 @@ def do_histogram_norm(input_meta_tensor, mask=None):
 def do_mr_to_pct(input_mr_file, output_pct_file, saved_model, device, prep_t1, **kwargs):
     # set network parameters and check net shape
     transformer_layers = kwargs.get("transformer_layers", 0)
-    img_size = kwargs.get("img_size", (448, 448, 56))
+    img_size = kwargs.get("img_size", (576, 576, 192))
     sliding_window_infer = kwargs.get("sliding_window_infer", False)
 
     net = ShuffleUNet(dimensions=3, in_channels=1, out_channels=1,
-        channels=(32, 64, 128, 256, 384), strides=(2, 2, 2, 2),
+        channels=(64, 128, 256, 384, 384), strides=(2, 2, 2, 2),
         kernel_size = 3, up_kernel_size = 3, num_res_units=0, 
         transformer_layers=transformer_layers, img_size=img_size
     )
@@ -259,9 +259,9 @@ def do_mr_to_pct(input_mr_file, output_pct_file, saved_model, device, prep_t1, *
             LoadImage(),
             EnsureChannelFirst(),
             Orientation(axcodes="RAS"),
-            Spacing(pixdim=(0.5, 0.5, 3.0)),
+            Spacing(pixdim=(-1, -1, 1.0)),
             CusCropForeground(),
-            CusResizeWithPadOrCrop(spatial_size=(448, 448, 64)),
+            CusResizeWithPadOrCrop(spatial_size=img_size),
             # CropForeground(),
             # ResizeWithPadOrCrop(spatial_size=(448, 448, 64), mode="constant"),
             HistogramNormalize(min=-1, max=1.0),
@@ -293,9 +293,9 @@ def do_mr_to_pct(input_mr_file, output_pct_file, saved_model, device, prep_t1, *
     print('Running MR to pCT...')
     with torch.no_grad():
         if not sliding_window_infer:
-            pesudo_ct_tensor = net(mr_tensor.cuda())
+            pesudo_ct_tensor = net(mr_tensor.to(device))
         else:
-            pesudo_ct_tensor = do_inference_3D_sliding_window(net, mr_tensor.cuda(), patch_size=(384, 384, 48))
+            pesudo_ct_tensor = do_inference_3D_sliding_window(net, mr_tensor.to(device), patch_size=kwargs['patch_size'])
     
     # invert transform using monai
     print('Invert the pCT to the original MR space...')

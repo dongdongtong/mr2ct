@@ -139,8 +139,8 @@ class TranslationTrainer:
         for idx, batch in enumerate(train_loader):
             log_losses = dict()
 
-            mr_img = self.reorganize_batch(batch['mr_image']).cuda(self.local_rank)
-            ct_img = self.reorganize_batch(batch['ct_image']).cuda(self.local_rank)
+            mr_img = batch['mr_image'].cuda(self.local_rank)
+            ct_img = batch['ct_image'].cuda(self.local_rank)
 
             # ==================================
             # ======= update generators ========

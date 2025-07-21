@@ -1,6 +1,8 @@
 import os
 from os.path import basename, dirname, join
 import monai.inferers
+import monai.networks
+import monai.networks.nets
 import yaml
 import time
 
@@ -30,6 +32,7 @@ from utils.visualizer import Visualizer
 from utils.netdef import ShuffleUNet
 
 from losses.gan_loss import GANLoss
+from losses.weighted_loss import WeightedL1Loss, WeightedMSELoss
 
 
 class TranslationTrainer:
@@ -102,10 +105,14 @@ class TranslationTrainer:
         self.init_lr_schedule()
 
         if args.resume:
-            if args.load_weights:
-                self.load_weights(args.resume_path)
-            else:
-                self.load_checkpoint(args.resume_path)
+            try:
+                if args.load_weights:
+                    self.load_weights(args.resume_path)
+                else:
+                    self.load_checkpoint(args.resume_path)
+            except Exception as e:
+                logger.error(f"Failed to resume model: {e}")
+                logger.error("Start training from scratch")
         
         print("All modules have been loaded!!")
     
@@ -132,10 +139,17 @@ class TranslationTrainer:
             b, c, h, w, d = ct_img.shape
             head_mask_sum = head_mask.view(b, -1).sum(1)
 
+            window_0_100_mask_sum = window_0_100_mask.view(b, -1).sum(1)
+
         window_0_100_fake_ct = torch.clamp(fake_ct, 0, 100)
         window_0_100_ct_img = torch.clamp(ct_img, 0, 100)
         # print(window_0_100_fake_ct.shape, window_0_100_ct_img.shape, head_mask.shape)
-        l1_loss_window_0_100 = (F.l1_loss(window_0_100_fake_ct, window_0_100_ct_img, reduction='none') * head_mask).reshape(b, -1).sum(1) / (head_mask_sum + 1)
+        if mode == "train":
+            weghted_criterion = nn.L1Loss(reduction='none') if self.config['criterion'] == 'l1' else nn.MSELoss(reduction='none')
+            # with torch.no_grad():
+            l1_loss_window_0_100 = (weghted_criterion(window_0_100_fake_ct, window_0_100_ct_img) * window_0_100_mask).reshape(b, -1).sum(1) / (window_0_100_mask_sum + 1)
+        else:
+            l1_loss_window_0_100 = (F.l1_loss(window_0_100_fake_ct, window_0_100_ct_img) * window_0_100_mask).reshape(b, -1).sum(1) / (window_0_100_mask_sum + 1)
         l1_loss_window_0_100 = l1_loss_window_0_100.mean()
         loss_ssims_window_0_100 = self.get_ssim_loss(window_0_100_fake_ct, window_0_100_ct_img, head_mask)
 
@@ -146,7 +160,13 @@ class TranslationTrainer:
 
         # window_500_1500_fake_ct = torch.clamp(fake_ct, 500, 1500)
         # window_500_1500_ct_img = torch.clamp(ct_img, 500, 1500)
-        l1_loss_window_100_1500 = self.criterion(fake_ct[window_100_1500_mask], ct_img[window_100_1500_mask])
+        # with torch.no_grad():
+        if mode == "train":
+            weghted_criterion = nn.L1Loss(reduction='none') if self.config['criterion'] == 'l1' else nn.MSELoss(reduction='none')
+            l1_loss_window_100_1500 = weghted_criterion(fake_ct[window_100_1500_mask], ct_img[window_100_1500_mask])
+        else:
+            l1_loss_window_100_1500 = F.l1_loss(fake_ct[window_100_1500_mask], ct_img[window_100_1500_mask])
+        l1_loss_window_100_1500 = l1_loss_window_100_1500.mean()
         # loss_ssims_window_500_1500 = self.get_ssim_loss(fake_ct, ct_img, window_500_1500_mask)
 
         loss_window_0_100 = self.config['scale_window_0_100'] * (
@@ -334,10 +354,10 @@ class TranslationTrainer:
         for idx, batch in enumerate(train_loader):
             log_losses = dict()
 
-            mr_img = batch['mr_image'].cuda(self.local_rank)
-            ct_img = batch['ct_image'].cuda(self.local_rank)
-            ct_brain_mask = batch['ct_brainmask']
-
+            mr_img = self.reorganize_batch(batch['mr_image']).cuda(self.local_rank)
+            ct_img = self.reorganize_batch(batch['ct_image']).cuda(self.local_rank)
+            ct_brain_mask = self.reorganize_batch(batch['ct_brainmask'])
+            
             # ==================================
             # ======= update generators ========
             # ==================================
@@ -356,7 +376,7 @@ class TranslationTrainer:
                 
                 windowed_loss_dict = self.get_windowed_loss(fake_ct, ct_img, ct_brain_mask, "train")
 
-                loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']
+                loss_G = (self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']) / self.gradient_accumulation_step
                 
                 loss_G.backward()
             else:
@@ -373,7 +393,7 @@ class TranslationTrainer:
 
                     windowed_loss_dict = self.get_windowed_loss(fake_ct, ct_img, ct_brain_mask, "train")
 
-                    loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']
+                    loss_G = (self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']) / self.gradient_accumulation_step
                     
                     self.scaler.scale(loss_G).backward()
             
@@ -383,6 +403,8 @@ class TranslationTrainer:
             #     self.visual.writer.add_histogram(name + "_grad", param.grad, self.epoch * len(train_loader) + idx)
 
             if (idx + 1) % self.gradient_accumulation_step == 0 or (idx + 1) == len(train_loader):
+                # max_grad_clip_norm = self.config.get("max_grad_clip_norm", 1)
+                # torch.nn.utils.clip_grad_norm_(self.G.parameters(), max_grad_clip_norm)
                 if self.amp:
                     self.scaler.step(self.optimizer_G)
                     self.scaler.update()
@@ -443,7 +465,13 @@ class TranslationTrainer:
             mr_img = torch.from_numpy(images['mr_image']).unsqueeze(0).cuda(self.local_rank)
             ct_img = torch.from_numpy(images['ct_image']).unsqueeze(0).cuda(self.local_rank)
         
-        fake_ct = self.forward_G(mr_img)
+        if mode == "train":
+            # print(mr_img.shape, ct_img.shape)
+            mr_img = mr_img[0, 0:1]
+            ct_img = ct_img[0, 0:1]
+        
+        # print(mr_img.shape)
+        fake_ct = self.sliding_window_infer(mr_img, self.G)
 
         error_image = (fake_ct - ct_img).abs()
         error_image = (error_image - error_image.min()) / (error_image.max() - error_image.min())
@@ -500,7 +528,7 @@ class TranslationTrainer:
                 ct_img = torch.from_numpy(images['ct_image']).unsqueeze(0).cuda(self.local_rank)
                 ct_brainmask = torch.from_numpy(images['ct_brainmask']).unsqueeze(0).cuda(self.local_rank)
             
-            fake_ct = self.forward_G(mr_img)
+            fake_ct = self.sliding_window_infer(mr_img, self.G)
 
             error_image = (fake_ct - ct_img).abs()
             error_image = (error_image - error_image.min()) / (error_image.max() - error_image.min())
@@ -514,7 +542,7 @@ class TranslationTrainer:
             
             windowed_loss_dict = self.get_windowed_loss(fake_ct, ct_img, ct_brainmask, "val")
 
-            loss_G = self.config['lambda_l1'] * loss_l1 + loss_ssim + windowed_loss_dict['loss']
+            loss_G = loss_l1 + windowed_loss_dict['l1_loss_window_0_100'] + windowed_loss_dict['l1_loss_window_100_1500']
 
             loss.update(loss_G.item(), n=1)
             loss_l1_.update(loss_l1.item(), n=1)
@@ -596,18 +624,11 @@ class TranslationTrainer:
             if self.local_rank == 0:
                 logger.info(f"epoch {epoch} lr is {self.optimizer_G.state_dict()['param_groups'][0]['lr']}")
             
-            # if self.local_rank == 0:
-            #     # visualizations
-            #     generated_images = self.run_eval_epoch(valid_ds)
-            #     self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="valid")
-
-            #     val_loss = self.run_eval_epoch_loss(valid_ds)
-            
             self.run_train_epoch(train_loader)
             
             if self.local_rank == 0 and (epoch + 1) % self.config["save_checkpoint_freq"] == 0:
                 # visualizations
-                generated_images = self.run_eval_epoch(train_ds)
+                generated_images = self.run_eval_epoch(train_ds, mode="train")
                 self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="train")
                 generated_images = self.run_eval_epoch(valid_ds)
                 self.visualization(generated_images, (self.epoch + 1) * len(train_loader), mode="valid")
@@ -649,6 +670,13 @@ class TranslationTrainer:
                     strides=(2, 2, 2, 2),
                     kernel_size=3, up_kernel_size=3, num_res_units=num_residual_units, img_size=img_size, 
                     transformer_layers=transformer_layers)
+            
+            # self.G = monai.networks.nets.UNet(spatial_dims=3,
+            #     in_channels=in_channels, out_channels=in_channels, 
+            #     channels=shuffleunet_filters, strides=(2, 2, 2, 2),
+            #     kernel_size=3, up_kernel_size=3, num_res_units=0, 
+            # )
+            
         elif model_name == "unet":
             strides = self.config['strides']
             filters = self.config['filters'][: len(strides)]
@@ -708,7 +736,7 @@ class TranslationTrainer:
         self.criterion_mse = nn.MSELoss()
         self.criterion_l1 = nn.L1Loss()
 
-        self.criterion = nn.L1Loss() if self.config['criterion'] == "l1" else nn.MSELoss()
+        self.criterion = nn.L1Loss(reduction='mean') if self.config['criterion'] == "l1" else nn.MSELoss(reduction='mean')
         self.criterion_ssim_3d = SSIMLoss(spatial_dims=3, data_range=1)  # for whole image ssim loss
         self.criterion_ssim_2d = SSIMLoss(spatial_dims=2, data_range=1, reduction="none")  # calculating ssim loss for each slice as then averaging them
     
@@ -718,8 +746,12 @@ class TranslationTrainer:
         visual_t_list = []
 
         mr_images = (generated_images_dict['mr_img'] + 1) / 2
-        ct_images = (generated_images_dict['ct_img'] + 1024) / 3000
-        fake_ct = (generated_images_dict['fake_ct'] + 1024) / 3000
+        window_0_100_fake_ct = torch.clamp(generated_images_dict['fake_ct'], 0, 100) / 100
+        window_0_100_ct_images = torch.clamp(generated_images_dict['ct_img'], 0, 100) / 100
+        window_100_1500_fake_ct = (torch.clamp(generated_images_dict['fake_ct'], 100, 1500)) / 1500
+        window_100_1500_ct_images = (torch.clamp(generated_images_dict['ct_img'], 100, 1500)) / 1500
+        ct_images = (generated_images_dict['ct_img'] + 1024) / 4024
+        fake_ct = (generated_images_dict['fake_ct'] + 1024) / 4024
         error_image = generated_images_dict['error_ct']
 
         mr_center_slice_num = mr_images.shape[-1] // 2
@@ -728,9 +760,13 @@ class TranslationTrainer:
 
         visual_s_list += [
             ('real_mr', mr_images[..., mr_center_slice_num].cpu()), 
-            ('fake_ct', fake_ct[..., ct_center_slice_num].cpu()), 
-            ('error_ct', error_image[..., ct_center_slice_num].cpu()),
-            ('real_ct', ct_images[..., ct_center_slice_num].cpu()), 
+            ('fake_ct', fake_ct[..., mr_center_slice_num].cpu()), 
+            ('error_ct', error_image[..., mr_center_slice_num].cpu()),
+            ('real_ct', ct_images[..., mr_center_slice_num].cpu()), 
+            ('window_0_100_fake_ct', window_0_100_fake_ct[..., mr_center_slice_num].cpu()),
+            ('window_0_100_real_ct', window_0_100_ct_images[..., mr_center_slice_num].cpu()),
+            ('window_100_1500_fake_ct', window_100_1500_fake_ct[..., mr_center_slice_num].cpu()),
+            ('window_100_1500_real_ct', window_100_1500_ct_images[..., mr_center_slice_num].cpu()),
         ]
         self.visual.display_current_results(OrderedDict(visual_s_list), "s", step, mode)
 

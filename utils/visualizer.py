@@ -172,7 +172,7 @@ class Visualizer(object):
                 imgs.append(t.expand(-1, 3, -1, -1).cpu())
         
         imgs = torch.cat(imgs, 0)     #Concatenates the given sequence of seq tensors in the given dimension.
-        imgs = make_grid(imgs.detach(), nrow=self.config['batch_size'], normalize=False, scale_each=False).cpu().numpy()   #Make a grid of images.
+        imgs = make_grid(imgs.detach(), nrow=4, normalize=False, scale_each=False).cpu().numpy()   #Make a grid of images.
         imgs = np.clip(imgs * 255, 0, 255).astype(np.uint8)   #限制数组值在一定范围 若小于0 则变为0
         imgs = imgs.transpose((1, 2, 0))
         imgs = Image.fromarray(imgs)

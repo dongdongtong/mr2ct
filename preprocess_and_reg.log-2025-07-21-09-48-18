@@ -1,0 +1,31 @@
+Extracting head masks for CT files using nnUNet...
+Head masks for CT files extracted and saved to: data/test_data/ct_headmask
+Renaming head mask files to add '_0000' suffix...
+do_prep_mr Preprocessing data/test_data/mr/CAOLUPING_0000.nii.gz
+Prepare MR head image done, output saved to: data/test_data/pre_head_mr/CAOLUPING_0000.nii.gz
+Prepare MR head mask done, output saved to: data/test_data/pre_head_mr/CAOLUPING_0000_headmask.nii.gz
+Configuring model on the CPU
+1 Binary brain mask and bet image saved to: data/test_data/bet_mr/CAOLUPING_0000_brainmask.nii.gz
+Masked image saved to: data/test_data/bet_mr/CAOLUPING_0000.nii.gz
+do_prep_mr Preprocessing data/test_data/mr/FANGLIRONG_0000.nii.gz
+Prepare MR head image done, output saved to: data/test_data/pre_head_mr/FANGLIRONG_0000.nii.gz
+Prepare MR head mask done, output saved to: data/test_data/pre_head_mr/FANGLIRONG_0000_headmask.nii.gz
+Configuring model on the CPU
+1 Binary brain mask and bet image saved to: data/test_data/bet_mr/FANGLIRONG_0000_brainmask.nii.gz
+Masked image saved to: data/test_data/bet_mr/FANGLIRONG_0000.nii.gz
+do_prep_ct Preprocessing data/test_data/ct/CAOLUPING_0000.nii.gz
+Prepare CT head image done, output saved to: data/test_data/pre_head_ct/CAOLUPING_0000.nii.gz
+Prepare CT head mask done, output saved to: data/test_data/pre_head_ct/CAOLUPING_0000_headmask.nii.gz
+Configuring model on the CPU
+1 Binary brain mask and bet image saved to: data/test_data/bet_ct/CAOLUPING_0000_brainmask.nii.gz
+Masked image saved to: data/test_data/bet_ct/CAOLUPING_0000.nii.gz
+do_prep_ct Preprocessing data/test_data/ct/FANGLIRONG_0000.nii.gz
+Prepare CT head image done, output saved to: data/test_data/pre_head_ct/FANGLIRONG_0000.nii.gz
+Prepare CT head mask done, output saved to: data/test_data/pre_head_ct/FANGLIRONG_0000_headmask.nii.gz
+Configuring model on the CPU
+1 Binary brain mask and bet image saved to: data/test_data/bet_ct/FANGLIRONG_0000_brainmask.nii.gz
+Masked image saved to: data/test_data/bet_ct/FANGLIRONG_0000.nii.gz
+Start registration...
+Total ct files to register: 2
+Registration from data/test_data/bet_ct/CAOLUPING_0000.nii.gz to data/test_data/bet_mr/CAOLUPING_0000.nii.gz starts...
+Registration from data/test_data/bet_ct/FANGLIRONG_0000.nii.gz to data/test_data/bet_mr/FANGLIRONG_0000.nii.gz starts...

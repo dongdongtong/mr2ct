@@ -31,6 +31,7 @@ class TransformerEncoder(nn.Module):
     ):
         pos = self.pos_emb(src).permute(1, 0, 2)
         b, c, h, w, d = src.shape
+        # print(src.shape)  # 36 36 12 input shape 576 576 64
         src = src.reshape(b, c, -1).permute(2, 0, 1)
 
         output = src
@@ -189,6 +190,7 @@ class ShuffleUNet(UNet):
             out_channels,
             channels,
             strides,
+            num_res_units=num_res_units
         )
 
         self.num_res_units = num_res_units

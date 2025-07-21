@@ -1,58 +1,27 @@
-import sys, os, copy
+import os
+
 import torch
 import torch.nn.functional as F
-from monai.config import print_config
-from monai.transforms.utils import equalize_hist
+
+import numpy as np
+import nibabel as nib
+
+from monai.data import MetaTensor
+from monai.transforms import Compose
+from monai.transforms.utils import allow_missing_keys_mode
+
 from monai.transforms import (
     Compose, LoadImage, EnsureChannelFirst, Orientation, Spacing,
     ToTensor, HistogramNormalize, ResizeWithPadOrCrop, CropForeground,
 )
-from monai.transforms.inverse import InvertibleTransform
-from monai.data.meta_obj import get_track_meta
 from monai.utils.type_conversion import convert_data_type, convert_to_dst_type, convert_to_tensor, get_equivalent_dtype
 from monai.transforms.utils import generate_spatial_bounding_box, compute_divisible_spatial_size
-from utils.netdef import ShuffleUNet
-import numpy as np
-import ants
-import matplotlib.pyplot as plt
-import matplotlib.colorbar
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import nibabel as nib
 
-import monai
-from monai.data import MetaTensor
+from monai.transforms.inverse import InvertibleTransform
 
 
-# define patch-based inference function
-# patches are 256 x 256 x 32 (i.e. 32 slices in axial/transverse plane)
-def do_inference_3D_sliding_window(net, x, patch_size=(384,384,48)):
-    sliding_window_infer = monai.inferers.inferer.SlidingWindowInferer(
-        roi_size=patch_size, sw_batch_size=1, overlap=0.5
-    )
-
-    out_tensor = sliding_window_infer(x, net)
-
-    return out_tensor
-
-# Prepare T1w MRI: bias correction and create head mask
-def do_prep_mr(img_file):
-    img = ants.image_read(img_file)
-    img_n4 = ants.n4_bias_field_correction(img)
-    img_tmp = img_n4.otsu_segmentation(k=3) # otsu_segmentation
-    img_tmp = ants.multi_label_morphology(img_tmp, 'MD', 2) # dilate 2
-    img_tmp = ants.smooth_image(img_tmp, 3) # smooth 3
-    img_tmp = ants.threshold_image(img_tmp, 0.5) # threshold 0.5
-    img_mask = ants.get_mask(img_tmp)
-    img_out = ants.multiply_images(img_n4, img_mask)
-
-    out_path = os.path.splitext(img_file)[0] + '_prep.nii.gz'
-    ants.image_write(img_out,(os.path.splitext(img_file)[0] + '_prep.nii'))
-    print('Prepare MR image done, output saved to: {}'.format((os.path.splitext(img_file)[0] + '_prep.nii')))
-
-    return out_path
-
-
-from monai.transforms.utils import allow_missing_keys_mode
+# allow the output of the model transformed inversely into the original space of the model input.
+# i.e., model output space -> model input space
 def inverse_transforms(
         data: MetaTensor, 
         valid_tfs: Compose, 
@@ -80,6 +49,7 @@ def inverse_transforms(
 
 
 class CusCropForeground(InvertibleTransform):
+    """Crop non-zero area of the input data."""
     def __init__(self,):
         pass
 
@@ -140,6 +110,7 @@ class CusCropForeground(InvertibleTransform):
 
 
 class CusResizeWithPadOrCrop(InvertibleTransform):
+    "Resize the input data with pad or crop, no interpolation."
     def __init__(self, spatial_size, mode="constant", value=0):
         self.spatial_size = spatial_size
         self.mode = mode
@@ -220,94 +191,37 @@ class CusResizeWithPadOrCrop(InvertibleTransform):
         return inverse_crop_data
 
 
-def do_histogram_norm(input_meta_tensor, mask=None):
-    img = convert_to_tensor(input_meta_tensor, track_meta=get_track_meta())
-    img_np, *_ = convert_data_type(img, np.ndarray)
-    mask_np: np.ndarray | None = None
-    if mask is not None:
-        mask_np, *_ = convert_data_type(mask, np.ndarray)
+transform_test = Compose(
+    [
+        LoadImage(),
+        EnsureChannelFirst(),
+        Orientation(axcodes="RAS"),
+        Spacing(pixdim=(0.5, 0.5, 3.0)),   # resampling
+        CusCropForeground(),
+        CusResizeWithPadOrCrop(spatial_size=(448, 448, 64)),
+        # CropForeground(),
+        # ResizeWithPadOrCrop(spatial_size=(448, 448, 64), mode="constant"),
+        HistogramNormalize(min=-1, max=1.0),
+    ]
+)
 
-    ret = equalize_hist(img=img_np, mask=mask_np, num_bins=256, min=-1, max=1)
-    out, *_ = convert_to_dst_type(src=ret, dst=img, dtype=img.dtype)
+# load the model input
+mr_img = "data/test_data/mr/FANGLIRONG_0000.nii.gz"
 
-    return out
+# transform the input
+model_input_meta_tensor = transform_test(mr_img)
 
+# do model inference here
+# ...
 
-# load MRIs
-def do_mr_to_pct(input_mr_file, output_pct_file, saved_model, device, prep_t1, **kwargs):
-    # set network parameters and check net shape
-    transformer_layers = kwargs.get("transformer_layers", 0)
-    img_size = kwargs.get("img_size", (448, 448, 56))
-    sliding_window_infer = kwargs.get("sliding_window_infer", False)
+# assume the model output is model_output
+model_output = torch.randn_like(model_input_meta_tensor)
 
-    net = ShuffleUNet(dimensions=3, in_channels=1, out_channels=1,
-        channels=(32, 64, 128, 256, 384), strides=(2, 2, 2, 2),
-        kernel_size = 3, up_kernel_size = 3, num_res_units=0, 
-        transformer_layers=transformer_layers, img_size=img_size
-    )
-    # net = ShuffleUNet(dimensions=3, in_channels=1, out_channels=1,
-    #     channels=(64, 128, 256, 512, 1024), strides=(2, 2, 2, 2),
-    #     kernel_size = 3, up_kernel_size = 3, num_res_units=0, 
-    #     transformer_layers=transformer_layers, img_size=img_size
-    # )
-    # n = torch.rand(1, 1, 256, 256, 32)
-    # print(net(n).shape)  # should be [1, 1, 256, 256, 32]
-
-    # specify transforms
-    transform_test = Compose(
-        [
-            LoadImage(),
-            EnsureChannelFirst(),
-            Orientation(axcodes="RAS"),
-            Spacing(pixdim=(0.5, 0.5, 3.0)),
-            CusCropForeground(),
-            CusResizeWithPadOrCrop(spatial_size=(448, 448, 64)),
-            # CropForeground(),
-            # ResizeWithPadOrCrop(spatial_size=(448, 448, 64), mode="constant"),
-            HistogramNormalize(min=-1, max=1.0),
-        ]
-    )
-
-    # custom_transforms = [
-    #     CusCropForeground(),
-    #     CusResizeWithPadOrCrop(spatial_size=(448, 448, 64)),
-    # ]
-
-    # load images
-    print('Loading MR image: {}'.format(input_mr_file))
-    if prep_t1:
-        print('Preparing MR image: bias correction and masking...')
-        pre_mr_path = do_prep_mr(input_mr_file)
-    else:
-        pre_mr_path = input_mr_file
-    mr_tensor = transform_test(pre_mr_path).unsqueeze(0)
-    # for tf in custom_transforms:
-    #     mr_tensor = tf(mr_tensor)
-    # mr_tensor = do_histogram_norm(mr_tensor).unsqueeze(0)
-    print(mr_tensor.shape)
-
-    net.to(device)
-    net.load_state_dict(saved_model)
-    net.eval()
-
-    print('Running MR to pCT...')
-    with torch.no_grad():
-        if not sliding_window_infer:
-            pesudo_ct_tensor = net(mr_tensor.cuda())
-        else:
-            pesudo_ct_tensor = do_inference_3D_sliding_window(net, mr_tensor.cuda(), patch_size=(384, 384, 48))
-    
-    # invert transform using monai
-    print('Invert the pCT to the original MR space...')
-    mr_tensor = mr_tensor.squeeze(0)
-    pesudo_ct_tensor = pesudo_ct_tensor.squeeze(0)
-
-    # for tf in custom_transforms[::-1]:
-    #     pesudo_ct_tensor = tf.inverse(pesudo_ct_tensor)
-    inverse_transforms(
-        pesudo_ct_tensor, transform_test, mr_tensor, pre_mr_path, output_pct_file
-    )
-
-    print('MR to pCT done, output saved to: {}'.format(output_pct_file))
-    print('')
-    print('Please inspect your output.')
+# inverse transform the model output
+inverse_transforms(
+    data=model_output, 
+    valid_tfs=transform_test, 
+    loaded_data=model_input_meta_tensor, 
+    orig_img_path=mr_img,
+    save_path="data/test_data/mr_inverse/FANGLIRONG_0000_inverse.nii.gz"
+)

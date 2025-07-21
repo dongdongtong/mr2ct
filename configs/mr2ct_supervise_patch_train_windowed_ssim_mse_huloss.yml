@@ -10,9 +10,9 @@ in_channel: 1   # in_channel is the same as the out_channel in cyclegan
 # =======================
 # generators
 model_name: shuffleunet  # shuffleunet, unet
-transformer_layers: 3
+transformer_layers: 0
 num_residual_units: 0
-shuffleunet_filters: [32, 64, 128, 256, 384]
+shuffleunet_filters: [64, 128, 256, 512, 1024]
 filters: [64, 96, 128, 192, 256, 384, 512, 768, 1024]  # filters reference from Optimized U-Net for Brain Tumor Segmentation <https://arxiv.org/pdf/2110.03352.pdf>
 kernel_size: 
   - [3, 3, 3]
@@ -66,9 +66,10 @@ file_suffix: ".nii.gz"
 data_root_dir: data
 image_subfolder_name: ct_reg2_mr_betneck          # contains the mr and ct subfolders
 data_json_path: data/cross_validation/cross_validation_fold_0.json    # if no json found in this path, it will be created in training
-img_centercrop_size: [448, 448, 64]
-use_patch: False
-patch_size: [448, 448, 56]   # [384, 416, 56]
+img_centercrop_size: [448, 448, 56]
+use_patch: True
+patch_n: 4
+patch_size: [256, 256, 32]   # [384, 416, 56]
 batch_size: 2
 workers: 4
 
@@ -76,14 +77,17 @@ workers: 4
 # =======================
 # === Training ========
 # =======================
-total_epochs: 2000
+total_epochs: 1000
 save_checkpoint_freq: 1
-criterion: l1
-lambda_l1: 20.0
-lambda_ssim_3d: 5.0
-lambda_ssim_yz: 5.0
-lambda_ssim_xz: 5.0
-lambda_ssim_xy: 5.0
+criterion: mse
+lambda_l1: 1.0
+lambda_ssim_3d: 10.0
+lambda_ssim_yz: 10.0
+lambda_ssim_xz: 10.0
+lambda_ssim_xy: 10.0
 
 scale_window_0_100: 0.5
-scale_window_100_1500: 0.5
+# scale_window_100_500: 0.5
+scale_window_100_1500: 0.
+
+max_grad_clip_norm: 11

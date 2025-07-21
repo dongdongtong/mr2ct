@@ -65,8 +65,8 @@ export CUDA_VISIBLE_DEVICES="$gpu_ids"
 
 # # add ssim loss
 # python3 scripts/train_sup.py \
-#     --config configs/mr2ct_supervise_transformer_ssim.yml \
-#     --trainer sup_mr2ct_no_patch_ssim \
+#     --config configs/mr2ct_supervise_transformer_windowed_ssim.yml \
+#     --trainer sup_mr2ct_no_patch_windowed_weighted_loss \
 #     --fold 0 \
 #     --gradient_accumulation_step 1 \
 #     --load_weights \
@@ -75,13 +75,36 @@ export CUDA_VISIBLE_DEVICES="$gpu_ids"
 #     # --amp
 
 
-# add windowed ssim loss
+# add ssim loss, window loss, window mse
 python3 scripts/train_sup.py \
-    --config configs/mr2ct_supervise_transformer_windowed_ssim.yml \
-    --trainer sup_mr2ct_no_patch_windowed \
+    --config configs/mr2ct_supervise_transformer_windowed_ssim_synthseg.yml \
+    --trainer sup_mr2ct_no_patch_windowed_weighted_loss_synthstrip \
     --fold 0 \
     --gradient_accumulation_step 1 \
     --load_weights \
     --resume \
-    --resume_path runs/mr2ct_supervise_transformer/no_weight_decay/model_best.pt \
+    --resume_path runs/mr2ct_supervise_transformer_windowed_ssim_synthseg/1/model_best.pt \
     # --amp
+
+
+# # add windowed ssim loss
+# python3 scripts/train_sup.py \
+#     --config configs/mr2ct_supervise_windowed_ssim_mse_huloss.yml \
+#     --trainer sup_mr2ct_no_patch_windowed_weighted_loss \
+#     --fold 0 \
+#     --gradient_accumulation_step 1 \
+#     --load_weights \
+#     --resume \
+#     --resume_path runs/mr2ct_supervise_windowed_ssim_mse_huloss/3/model_best.pt \
+#     # --amp
+
+
+# # enlarge the model parameters
+# python3 scripts/train_sup.py \
+#     --config configs/mr2ct_supervise_windowed_ssim_mse_huloss_normct01.yml \
+#     --trainer sup_mr2ct_no_patch_windowed_weighted_loss_normct01 \
+#     --fold 0 \
+#     --gradient_accumulation_step 1 \
+#     --load_weights \
+#     --resume \
+#     --resume_path runs/mr2ct_supervise_windowed_ssim_mse_huloss_normct01/only_mse/model_best.pt

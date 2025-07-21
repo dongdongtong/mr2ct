@@ -37,6 +37,16 @@ class AlignedDataset(Dataset):
 
             new_dict = {'mr_image': mr_patches, 'ct_image': ct_patches}
 
+            if data_dict[0].get('ct_brainmask', None) is not None:
+                ct_brainmask_list = [data_dict[i]['ct_brainmask'].unsqueeze(0) for i in range(len(data_dict))]
+                ct_brainmask_patches = torch.concatenate(ct_brainmask_list, dim=0)
+                new_dict['ct_brainmask'] = ct_brainmask_patches.type(torch.LongTensor)
+            
+            if data_dict[0].get('ct_skullstrip_mask', None) is not None:
+                ct_skullstrip_mask_list = [data_dict[i]['ct_skullstrip_mask'].unsqueeze(0) for i in range(len(data_dict))]
+                ct_skullstrip_mask_patches = torch.concatenate(ct_skullstrip_mask_list, dim=0)
+                new_dict['ct_skullstrip_mask'] = ct_skullstrip_mask_patches.type(torch.LongTensor)
+
             new_dict['mr_img_path'] = mr_img_path
             new_dict['ct_img_path'] = ct_img_path
         else:
@@ -46,6 +56,10 @@ class AlignedDataset(Dataset):
             ct_brainmask = data_dict.get('ct_brainmask', None)
             if ct_brainmask is not None:
                 new_dict['ct_brainmask'] = ct_brainmask.type(torch.LongTensor)
+            
+            ct_skullstrip_mask = data_dict.get('ct_skullstrip_mask', None)
+            if ct_skullstrip_mask is not None:
+                new_dict['ct_skullstrip_mask'] = ct_skullstrip_mask.type(torch.LongTensor)
 
             new_dict['mr_img_path'] = mr_img_path
             new_dict['ct_img_path'] = ct_img_path
@@ -80,6 +94,16 @@ class AlignedDatasetCache(CacheDataset):
 
             new_dict = {'mr_image': mr_patches, 'ct_image': ct_patches}
 
+            if data_dict[0].get('ct_brainmask', None) is not None:
+                ct_brainmask_list = [data_dict[i]['ct_brainmask'].unsqueeze(0) for i in range(len(data_dict))]
+                ct_brainmask_patches = torch.concatenate(ct_brainmask_list, dim=0)
+                new_dict['ct_brainmask'] = ct_brainmask_patches.type(torch.LongTensor)
+            
+            if data_dict[0].get('ct_skullstrip_mask', None) is not None:
+                ct_skullstrip_mask_list = [data_dict[i]['ct_skullstrip_mask'].unsqueeze(0) for i in range(len(data_dict))]
+                ct_skullstrip_mask_patches = torch.concatenate(ct_skullstrip_mask_list, dim=0)
+                new_dict['ct_skullstrip_mask'] = ct_skullstrip_mask_patches.type(torch.LongTensor)
+
             new_dict['mr_img_path'] = mr_img_path
             new_dict['ct_img_path'] = ct_img_path
         else:
@@ -89,6 +113,10 @@ class AlignedDatasetCache(CacheDataset):
             ct_brainmask = data_dict.get('ct_brainmask', None)
             if ct_brainmask is not None:
                 new_dict['ct_brainmask'] = ct_brainmask.type(torch.LongTensor)
+            
+            ct_skullstrip_mask = data_dict.get('ct_skullstrip_mask', None)
+            if ct_skullstrip_mask is not None:
+                new_dict['ct_skullstrip_mask'] = ct_skullstrip_mask.type(torch.LongTensor)
 
             new_dict['mr_img_path'] = mr_img_path
             new_dict['ct_img_path'] = ct_img_path
