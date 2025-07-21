@@ -35,7 +35,7 @@ Main introduction to the preprocessing pipeline for paired MR and CT data.
 Steps:
 1. Install [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md)
 2. Extract Dataset141_CTHeadMask.tar.gz to the `nnUNet_results` environment variable location set for nnunetv2
-   1. For example, if nnUNet_results="/data/dingsd/nnunetv2/nnunetv2_datasets/nnUNet_results"
+   1. For example, if nnUNet_results="/data/user/nnunetv2/nnunetv2_datasets/nnUNet_results"
    2. Execute: `tar -zxvf /path/of/Dataset141_CTHeadMask.tar.gz $nnUNet_results`
 3. Install [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping
    1. `pip install surfa`

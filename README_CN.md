@@ -35,7 +35,7 @@ mr2ct/
 步骤
 1. 安装[nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md)
 2. 将Dataset141_CTHeadMask.tar.gz 解压至为nnunetv2设定的`nnUNet_results`环境变量位置
-   1. 例如，若nnUNet_results="/data/dingsd/nnunetv2/nnunetv2_datasets/nnUNet_results"
+   1. 例如，若nnUNet_results="/data/user/nnunetv2/nnunetv2_datasets/nnUNet_results"
    2. 则执行，`tar -zxvf /path/of/Dataset141_CTHeadMask.tar.gz $nnUNet_results`
 3. 安装[synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip)去头骨
    1. `pip install surfa`
