@@ -14,11 +14,12 @@ mr2ct/
 │   ├── dcm2nii    # DICOM数据转换为NIFTI数据
 ├── configs  # 配置文件
 ├── datasets # 数据加载及组织
-├── models   # 模型定义
+├── models   # 模型定义(未被使用)
 ├── trainer  # 模型训练
-├── utils    # 工具函数
+├── utils    # 工具函数，包括UNet模型定义
 ├── scripts  # 训练脚本
 ├── figures  # 相关图示
+├── used_scripts  # 使用过的一次性脚本，或许有用
 ├── mr2ct_t12ct_one_example.py  # 单个MR图像推理脚本
 ├── mr2ct_t12ct_multistage_eval.py  # 多阶段模型评估
 ```
@@ -79,6 +80,7 @@ data_root_dir/
     ├── patient2_0000_headmask.nii.gz
     └── ...
 ```
+
 
 ## Training
 网络模型见下图。
