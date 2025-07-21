@@ -13,7 +13,13 @@ export CUDA_VISIBLE_DEVICES="$gpu_ids"
 # Get the length of the gpu_devices array
 # gpu_devices_length=${#gpu_devices[@]}
 
+
 python3 scripts/train_sup.py \
-    --config configs/mr2ct_supervise_t12ct_larger_patch_completehw_transformer.yml \
+    --config configs/mr2ct_supervise_t12ct.yml \
     --trainer sup_mr2ct \
-    --gradient_accumulation_step 2
+    --gradient_accumulation_step 1 \
+
+# python3 scripts/train_sup.py \
+#     --config configs/mr2ct_supervise_t12ct_larger_patch_completehw_transformer.yml \
+#     --trainer sup_mr2ct \
+#     --gradient_accumulation_step 2

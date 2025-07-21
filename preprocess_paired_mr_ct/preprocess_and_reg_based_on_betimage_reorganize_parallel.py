@@ -23,6 +23,9 @@ def do_prep_mr(img_file, out_file):
     "- skull stripping for more accurate registration"
     os.makedirs(dirname(out_file), exist_ok=True)
     print(f"do_prep_mr Preprocessing {img_file}")
+    if os.path.exists(out_file) and os.path.exists(out_file.replace('.nii.gz', '_headmask.nii.gz')):
+        print(f"Preprocessed files already exist: {out_file} and {out_file.replace('.nii.gz', '_headmask.nii.gz')}")
+        return
 
     img = ants.image_read(img_file)
     # N4 bias correction
@@ -49,6 +52,10 @@ def do_prep_ct(img_file, out_file, head_mask_path):
     "- skull stripping for more accurate registration"
     os.makedirs(dirname(out_file), exist_ok=True)
     print(f"do_prep_ct Preprocessing {img_file}")
+    
+    if os.path.exists(out_file) and os.path.exists(out_file.replace('.nii.gz', '_headmask.nii.gz')):
+        print(f"Preprocessed files already exist: {out_file} and {out_file.replace('.nii.gz', '_headmask.nii.gz')}")
+        return
 
     # n4 bias correction
     img_ants = ants.n4_bias_field_correction(ants.image_read(img_file))
@@ -76,6 +83,10 @@ def do_prep_ct(img_file, out_file, head_mask_path):
 
 
 def bet_nii(img_file, out_file, synthstrip_model_path=SYNTHSTRIP_MODEL_PATH):
+    if os.path.exists(out_file) and os.path.exists(out_file.replace('.nii.gz', '_brainmask.nii.gz')):
+        print(f"Skull stripped files already exist: {out_file} and {out_file.replace('.nii.gz', '_brainmask.nii.gz')}")
+        return
+    
     skull_stripping(img_file, out_file, model_path=synthstrip_model_path)
 
 
@@ -91,11 +102,17 @@ def do_registration_ct2mr(
 
     bet_ct_img_pre = ants.image_read(bet_ct_file)
     head_ct_img_pre = ants.image_read(pre_head_ct_file)
-    ct_brainmask = ants.image_read(bet_ct_file.replace('.nii.gz', '_brainmask.nii.gz'))
-    ct_headmask = ants.image_read(join(dirname(pre_head_ct_file), "ct_headmask", basename(pre_head_ct_file)))
     
     bet_mr_img_pre = ants.image_read(bet_mr_file)
     head_mr_img_pre = ants.image_read(pre_head_mr_file)
+    
+    ct_brainmask_path = bet_ct_file.replace('.nii.gz', '_brainmask.nii.gz')
+    ct_headmask_path = join(dirname(dirname(pre_head_ct_file)), "ct_headmask", basename(pre_head_ct_file))
+    if not os.path.exists(ct_brainmask_path) or not os.path.exists(ct_headmask_path):
+        print(f"CT brain mask or head mask not found for {pre_head_ct_file}. Skipping registration.")
+        return
+    ct_brainmask = ants.image_read(ct_brainmask_path)
+    ct_headmask = ants.image_read(ct_headmask_path)
 
     print(f"Registration from {bet_ct_file} to {bet_mr_file} starts...")
     out_dict = ants.registration(
@@ -137,12 +154,52 @@ def do_registration_ct2mr(
     ants.image_write(reged_bet_ct_brainmask, reg_ct_brainmask_file)
 
 
+def process_mr_file(args):
+    """Wrapper function for parallel MR processing"""
+    mr_file, root_dir = args
+    pre_mr_file = join(root_dir, "pre_head_mr", basename(mr_file))
+    do_prep_mr(mr_file, pre_mr_file)   # both pre_head_mr and headmask will be saved
+
+    # skull stripping
+    bet_mr_file = join(root_dir, "bet_mr", basename(mr_file))
+    bet_nii(pre_mr_file, bet_mr_file)  # both brain and brainmask will be saved
+
+def process_ct_file(args):
+    """Wrapper function for parallel CT processing"""
+    ct_file, root_dir = args
+    ct_headmask_dir = join(root_dir, "ct_headmask")
+    pre_ct_file = join(root_dir, "pre_head_ct", basename(ct_file))
+    ct_head_mask_file = join(ct_headmask_dir, basename(ct_file))
+    
+    if not os.path.exists(ct_head_mask_file):
+        print(f"CT head mask file not found: {ct_head_mask_file}")
+        return
+    
+    do_prep_ct(ct_file, pre_ct_file, ct_head_mask_file)
+
+    # skull stripping
+    bet_ct_file = join(root_dir, "bet_ct", basename(ct_file))
+    bet_nii(pre_ct_file, bet_ct_file)  # both brain and brain_mask will be saved
+
+def process_registration(args):
+    """Wrapper function for parallel registration processing"""
+    pre_head_ct_file, root_dir = args
+    bet_ct_file = join(root_dir, "bet_ct", basename(pre_head_ct_file))
+    bet_mr_file = join(root_dir, "bet_mr", basename(pre_head_ct_file))
+    pre_head_mr_file = join(root_dir, "pre_head_mr", basename(pre_head_ct_file))
+    output_reg_ct_file = join(root_dir, "ct_reg2_mr", basename(pre_head_ct_file))
+    
+    do_registration_ct2mr(bet_ct_file, bet_mr_file, pre_head_ct_file, pre_head_mr_file, output_reg_ct_file)
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Preprocess paired MR and CT images, including skull stripping and registration.")
     parser.add_argument('--root_dir', type=str, required=True, help='Root directory containing CT and MR images.')
+    parser.add_argument('--num_processes', type=int, default=16, help='Number of parallel processes for preprocessing (default: 1 for sequential processing)')
     args = parser.parse_args()
     root_dir = args.root_dir
+    num_processes = args.num_processes
+    
     ct_dir = join(root_dir, "ct")  # a list of files ending with .nii.gz
     mr_dir = join(root_dir, "mr")  # a list of files ending with .nii.gz
 
@@ -150,7 +207,7 @@ def main():
     ct_headmask_dir = join(root_dir, "ct_headmask")
     os.makedirs(ct_headmask_dir, exist_ok=True)
     print("Extracting head masks for CT files using nnUNet...")
-    os.system(f"nnUNetv2_predict -i {ct_dir} -o {ct_headmask_dir} -d 141 -c 3d_fullres -tr nnUNetTrainer_30Epoch -f 0 1 2 3 4")    # this will remove image's 0000 in basename
+    # os.system(f"nnUNetv2_predict -i {ct_dir} -o {ct_headmask_dir} -d 141 -c 3d_fullres -tr nnUNetTrainer_30Epoch -f 0 1 2 3 4")    # this will remove image's 0000 in basename
     print(f"Head masks for CT files extracted and saved to: {ct_headmask_dir}")
     # we need to rename the files ending with "_0000.nii.gz"
     print("Renaming head mask files to add '_0000' suffix...")
@@ -164,24 +221,26 @@ def main():
     mr_files = list(glob(join(mr_dir, "*.nii.gz")))
     ct_files = list(glob(join(ct_dir, "*.nii.gz")))
 
-    for mr_file in mr_files:
-        pre_mr_file = join(root_dir, "pre_head_mr", basename(mr_file))
-        do_prep_mr(mr_file, pre_mr_file)   # both pre_head_mr and headmask will be saved
-
-        # skull stripping
-        bet_mr_file = join(root_dir, "bet_mr", basename(mr_file))
-        bet_nii(pre_mr_file, bet_mr_file)  # both brain and brainmask will be saved
+    if num_processes > 1:
+        print(f"Processing MR files in parallel with {num_processes} processes...")
+        with multiprocessing.Pool(processes=num_processes) as pool:
+            mr_args = [(mr_file, root_dir) for mr_file in mr_files]
+            pool.map(process_mr_file, mr_args)
+        
+        print(f"Processing CT files in parallel with {num_processes} processes...")
+        with multiprocessing.Pool(processes=num_processes) as pool:
+            ct_args = [(ct_file, root_dir) for ct_file in ct_files]
+            pool.map(process_ct_file, ct_args)
+    else:
+        print("Processing MR files sequentially...")
+        for mr_file in mr_files:
+            process_mr_file((mr_file, root_dir))
+        
+        print("Processing CT files sequentially...")
+        for ct_file in ct_files:
+            process_ct_file((ct_file, root_dir))
     
-    for ct_file in ct_files:
-        pre_ct_file = join(root_dir, "pre_head_ct", basename(ct_file))
-        ct_head_mask_file = join(ct_headmask_dir, basename(ct_file))
-        do_prep_ct(ct_file, pre_ct_file, ct_head_mask_file)
-
-        # skull stripping
-        bet_ct_file = join(root_dir, "bet_ct", basename(ct_file))
-        bet_nii(pre_ct_file, bet_ct_file)  # both brain and brain_mask will be saved
-    
-    # registration
+    # registration - now with parallel support
     pre_head_ct_files = list(glob(join(root_dir, "pre_head_ct", "*.nii.gz")))
 
     # remove mask files in the list
@@ -191,15 +250,17 @@ def main():
     print("Start registration...")
     print(f"Total ct files to register: {len(pre_head_ct_files)}")
     out_root_dir = join(root_dir, "ct_reg2_mr")
-    for pre_head_ct_file in pre_head_ct_files:
-        bet_ct_file = join(root_dir, "bet_ct", basename(pre_head_ct_file))
-        bet_mr_file = join(root_dir, "bet_mr", basename(pre_head_ct_file))
-        
-        pre_head_mr_file = join(root_dir, "pre_head_mr", basename(pre_head_ct_file))
-
-        output_reg_ct_file = join(out_root_dir, basename(pre_head_ct_file))
-
-        do_registration_ct2mr(bet_ct_file, bet_mr_file, pre_head_ct_file, pre_head_mr_file, output_reg_ct_file)
+    os.makedirs(out_root_dir, exist_ok=True)
+    
+    if num_processes > 1:
+        print(f"Processing registration in parallel with {num_processes} processes...")
+        with multiprocessing.Pool(processes=num_processes) as pool:
+            reg_args = [(pre_head_ct_file, root_dir) for pre_head_ct_file in pre_head_ct_files]
+            pool.map(process_registration, reg_args)
+    else:
+        print("Processing registration sequentially...")
+        for pre_head_ct_file in pre_head_ct_files:
+            process_registration((pre_head_ct_file, root_dir))
 
     # ==============================================================================
     # the final files are ct files in "ct_reg2_mr" and mr files in "pre_head_mr"

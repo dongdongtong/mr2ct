@@ -64,9 +64,10 @@ generator:
 #         ├── 0002_brainseg.nii.gz
 #         └── ...
 file_suffix: ".nii.gz"
-data_root_dir: data
-image_subfolder_name: ct_reg2_mr_betneck          # contains the mr and ct subfolders
-data_json_path: data/cross_validation_t12ct/cross_validation_fold_0.json    # if no json found in this path, it will be created in training
+data_root_dir: data/dcm2nii
+ct_subfolder_name: ct_reg2_mr          # contains the mr and ct subfolders
+mr_subfolder_name: pre_head_mr          # contains the mr and ct subfolders
+data_json_path: data/dcm2nii/cross_validation_t12ct/cross_validation_fold_0.json    # if no json found in this path, it will be created in data_root_dir/cross_validation_t12ct
 pix_dim: [-1, -1, 1.0]
 img_centercrop_size: [576, 576, 192]  # 480, 576, 448
 use_patch: True

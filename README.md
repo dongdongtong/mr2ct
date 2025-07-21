@@ -8,10 +8,14 @@ mr2ct/
 ├── README.md
 ├── preprocess_paired_mr_ct  # Data preprocessing
 ├── data  # Data storage directory
-│   ├── synthstrip  # synthstrip skull stripping model
-│   ├── Dataset141_CTHeadMask.tar.gz  # nnunetv2 head mask dataset
-│   ├── test_data  # Test preprocessing code
-│   ├── dcm2nii    # DICOM to NIFTI data conversion
+   ├── synthstrip  # synthstrip skull stripping model
+   ├── Dataset141_CTHeadMask.tar.gz  # nnunetv2 head mask dataset
+   ├── dcm2nii    # DICOM to NIFTI data conversion
+      ├── cross_validation_t12ct    # Data split
+      ├── ct
+      ├── mr
+      ├── ct_reg2_mr   # For model training: final preprocessed CT data registered to MR
+      ├── pre_head_mr      # For model training: preprocessed MR data
 ├── configs  # Configuration files
 ├── datasets # Data loading and organization
 ├── models   # Model definitions (unused)
@@ -19,6 +23,7 @@ mr2ct/
 ├── utils    # Utility functions, including UNet model definition
 ├── scripts  # Training scripts
 ├── figures  # Related diagrams
+├── runs     # Experiment results
 ├── used_scripts  # Previously used one-time scripts, potentially useful
 ├── mr2ct_t12ct_one_example.py  # Single MR image inference script
 ├── mr2ct_t12ct_multistage_eval.py  # Multi-stage model evaluation
@@ -28,13 +33,13 @@ mr2ct/
 Main introduction to the preprocessing pipeline for paired MR and CT data.
 
 Steps:
-1. Install nnunetv2
+1. Install [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md)
 2. Extract Dataset141_CTHeadMask.tar.gz to the `nnUNet_results` environment variable location set for nnunetv2
    1. For example, if nnUNet_results="/data/dingsd/nnunetv2/nnunetv2_datasets/nnUNet_results"
    2. Execute: `tar -zxvf /path/of/Dataset141_CTHeadMask.tar.gz $nnUNet_results`
-3. Install synthstrip for skull stripping
+3. Install [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping
    1. `pip install surfa`
-   2. Place `synthstrip.1.pt` in the `data/synthstrip` directory
+   2. Place `synthstrip.1.pt` in the `data/synthstrip` directory (create if needed)
 4. Run `bash preprocess_paired_mr_ct/pipeline.sh /path/to/data_root_dir` for data preprocessing. The preprocessed results will be stored directly in `/path/to/data_root_dir`. Preprocessing includes:
    1. For CT data: nnunetv2 head mask extraction, N4 bias field correction, setting regions outside the head to -1024 using the head mask
    2. For MR data: N4 bias field correction, OTSU head mask extraction, setting regions outside the head to 0 using the head mask
@@ -62,11 +67,13 @@ data_root_dir/
 │   ├── patient1_0000.nii.gz
 │   ├── patient2_0000.nii.gz
 │   └── ...
-├── headct_reg2_mr   # For model training: final preprocessed CT data registered to MR
+├── ct_reg2_mr   # For model training: final preprocessed CT data registered to MR
 │   ├── patient1_0000.nii.gz
 │   ├── patient1_0000_headmask.nii.gz
+│   ├── patient1_0000_brainmask.nii.gz
 │   ├── patient2_0000.nii.gz
 │   ├── patient2_0000_headmask.nii.gz
+│   ├── patient2_0000_brainmask.nii.gz
 │   └── ...
 ├── mr
 │   ├── patient1_0000.nii.gz
@@ -80,12 +87,21 @@ data_root_dir/
     └── ...
 ```
 
+## Configs
+All configuration files are located in the `configs` directory. Each configuration file defines the model, data location, data split used, and training hyperparameters. The following four main data configurations need attention:
+```
+data_root_dir: data/dcm2nii    # Data storage root directory
+ct_subfolder_name: ct_reg2_mr          # Subfolder containing CT data
+mr_subfolder_name: pre_head_mr          # Subfolder containing MR data
+data_json_path: data/dcm2nii/cross_validation_t12ct/cross_validation_fold_0.json    # If no json file exists at this path, it will be created under data_root_dir/cross_validation_t12ct
+```
+
 ## Training
 The network model is shown in the figure below.
 ![figure](figures/cyclegan_mr2ct_supervise.png)
 Model training adopts a multi-stage training approach using patch-based method, starting with small patches for fast training, then progressing through three stages using weights from the previous stage, gradually increasing image patch size for training, and finally introducing transformer structure and window loss.
 
-To execute model training, the training process will read CT and MR data from `headct_reg2_mr` and `pre_head_mr` directories and generate a `data/mr2ct_cyclegan.json` file containing training and validation data:
+To execute model training, the training process will read CT and MR data from `headct_reg2_mr` and `pre_head_mr` directories and generate a `json` file containing training and validation data:
 ```
 bash scripts/run_train_t12ct.sh
 ```
@@ -110,13 +126,15 @@ To evaluate the trained model, execute:
 ```
 python mr2ct_t12ct_multistage_eval.py
 ```
-for model evaluation. This script will directly load previously trained models from various stages and also load the MR data validation set (stored in the `data/mr2ct_cyclegan.json` file) for model evaluation.
+for model evaluation. This script will directly load previously trained models from various stages and also load the MR data validation set (stored in the `data_json_path` file) for model evaluation.
 
 The evaluation metrics mainly include Mean Absolute Error (MAE) for CT values within various HU ranges.
 
-
 ## Environment Requirements
-Some necessary installation packages can be found here. If installation fails, you may need to install them manually:
+Some necessary packages can be referenced here. If installation fails, manual installation is required:
 ```
 pip install -r requirements.txt
 ```
+
+## Acknowledgements
+This project used [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md) for model development of head mask extraction and [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping. Thanks to the authors of these tools.

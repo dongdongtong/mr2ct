@@ -18,6 +18,7 @@ import datasets.augmentations_patch_t12ct as aug_sup_t12ct
 from monai.data.dataset import CacheDataset
 
 from sklearn.model_selection import train_test_split
+from .split_data_cross_validation import generate_cross_validation_json
 
 
 def save_json(obj, file: str, indent: int = 4, sort_keys: bool = True) -> None:
@@ -31,24 +32,27 @@ def worker_init_fn(worker_id):    # see: https://pytorch.org/docs/stable/notes/r
     random.seed(worker_seed)
 
 
-def load_data_dicts_from_data_root(data_root_path, image_subfolder_name, mr_brainmask_subfolder_name, file_suffix):
-    image_root_path = join(data_root_path, image_subfolder_name)
-    mr_brainmask_subfolder_name = join(data_root_path, mr_brainmask_subfolder_name)
+def load_data_dicts_from_data_root(data_root_path, mr_subfolder_name, ct_subfolder_name, file_suffix):
+        
+    mr_data_root_path = join(data_root_path, mr_subfolder_name)
+    ct_data_root_path = join(data_root_path, ct_subfolder_name)
 
-    mr_image_files = list(glob(join(image_root_path, "mr", f"*{file_suffix}")))
+    mr_image_files = list(glob(join(mr_data_root_path, f"*{file_suffix}")))
     mr_image_files = sorted(mr_image_files, key=lambda x: basename(x).split(".")[0])  # sort by pid
 
     data_dicts = []
     for mr_image_file in mr_image_files:
         pid = basename(mr_image_file).split(".")[0]
-        ct_image_file = join(image_root_path, "ct", pid + file_suffix)
-        mr_brainmask_file = join(mr_brainmask_subfolder_name, pid + f"_brainseg{file_suffix}")
+        ct_image_file = join(ct_data_root_path, pid + file_suffix)
+        ct_headmask_file = ct_image_file.replace('.nii.gz', '_headmask.nii.gz')
+        ct_brainmask_file = ct_image_file.replace('.nii.gz', '_brainmask.nii.gz')
 
-        if os.path.exists(ct_image_file) and os.path.exists(mr_brainmask_file):
+        if os.path.exists(ct_image_file) and os.path.exists(ct_headmask_file) and os.path.exists(ct_brainmask_file):
             data_dicts.append({
                 "mr_image": mr_image_file,
                 "ct_image": ct_image_file,
-                "mr_brainmask": mr_brainmask_file
+                "ct_brainmask": ct_headmask_file,
+                "ct_skullstrip_mask": ct_brainmask_file,
             })
     
     return data_dicts
@@ -152,17 +156,15 @@ def create_patch_loader(args, rank, tune_param=False, **kwargs):
         
     else:
         data_root_dir = config['data_root_dir']
-        image_subfolder_name = config['image_subfolder_name']
-        mr_brainmask_subfolder_name = config['mr_brainmask_subfolder_name']
-        data_dicts = load_data_dicts_from_data_root(data_root_dir, image_subfolder_name, mr_brainmask_subfolder_name, data_file_suffix)
-        X_train, X_val = train_test_split(data_dicts, test_size=0.2, random_state=random_seed)
-
-        data_json = {
-            "training": X_train,
-            "validation": X_val
-        }
-
-        save_json(data_json, data_json_path)
+        # image_subfolder_name = config['image_subfolder_name']
+        # mr_brainmask_subfolder_name = config['mr_brainmask_subfolder_name']
+        mr_subfolder_name = config['mr_subfolder_name']
+        ct_subfolder_name = config['ct_subfolder_name']
+        generate_cross_validation_json(data_root_dir, mr_subfolder_name, ct_subfolder_name, data_file_suffix)
+        
+        # load generated json
+        with open(data_json_path, encoding='utf-8') as f:
+            data_json = json.load(f)
     
     training_json = data_json['training']
     val_json = data_json['validation']

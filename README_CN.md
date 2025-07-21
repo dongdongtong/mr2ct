@@ -8,10 +8,14 @@ mr2ct/
 ├── README.md
 ├── preprocess_paired_mr_ct  # 数据预处理
 ├── data  # 数据存放目录
-│   ├── synthstrip  # synthstrip去头骨模型
-│   ├── Dataset141_CTHeadMask.tar.gz  # nnunetv2头部掩膜数据集
-│   ├── test_data  # 测试预处理代码
-│   ├── dcm2nii    # DICOM数据转换为NIFTI数据
+   ├── synthstrip  # synthstrip去头骨模型
+   ├── Dataset141_CTHeadMask.tar.gz  # nnunetv2头部掩膜数据集
+   ├── dcm2nii    # DICOM数据转换为NIFTI数据
+      ├── cross_validation_t12ct    # 数据划分
+      ├── ct
+      ├── mr
+      ├── ct_reg2_mr   # 模型训练用：最终预处理后且与MR配准的CT数据
+      ├── pre_head_mr      # 模型训练用：预处理后的MR数据
 ├── configs  # 配置文件
 ├── datasets # 数据加载及组织
 ├── models   # 模型定义(未被使用)
@@ -19,6 +23,7 @@ mr2ct/
 ├── utils    # 工具函数，包括UNet模型定义
 ├── scripts  # 训练脚本
 ├── figures  # 相关图示
+├── runs     # 实验结果
 ├── used_scripts  # 使用过的一次性脚本，或许有用
 ├── mr2ct_t12ct_one_example.py  # 单个MR图像推理脚本
 ├── mr2ct_t12ct_multistage_eval.py  # 多阶段模型评估
@@ -28,13 +33,13 @@ mr2ct/
 主要介绍对MR和CT配对数据的预处理流程。
 
 步骤
-1. 安装nnunetv2
+1. 安装[nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md)
 2. 将Dataset141_CTHeadMask.tar.gz 解压至为nnunetv2设定的`nnUNet_results`环境变量位置
    1. 例如，若nnUNet_results="/data/dingsd/nnunetv2/nnunetv2_datasets/nnUNet_results"
    2. 则执行，`tar -zxvf /path/of/Dataset141_CTHeadMask.tar.gz $nnUNet_results`
-3. 安装synthstrip去头骨
+3. 安装[synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip)去头骨
    1. `pip install surfa`
-   2. 将`synthstrip.1.pt`放置于`data/synthstrip`目录下
+   2. 将`synthstrip.1.pt`放置于`data/synthstrip`目录下(新建一下)
 4. 运行`bash preprocess_paired_mr_ct/pipeline.sh /path/to/data_root_dir`，进行数据预处理，预处理后的结果会直接存放在`/path/to/data_root_dir`下，预处理包含
    1. 针对CT数据，预处理包含：nnunetv2头部掩膜提取、N4偏置场校正、利用头部掩膜将头外区域置为-1024
    2. 针对MR数据，预处理包含：N4偏置场校正、OTSU头部掩膜提取、利用头部掩膜将头外区域置为0
@@ -63,11 +68,13 @@ data_root_dir/
 │   ├── patient1_0000.nii.gz
 │   ├── patient2_0000.nii.gz
 │   └── ...
-├── headct_reg2_mr   # 模型训练用：最终预处理后且与MR配准的CT数据
+├── ct_reg2_mr   # 模型训练用：最终预处理后且与MR配准的CT数据
 │   ├── patient1_0000.nii.gz
 │   ├── patient1_0000_headmask.nii.gz
+│   ├── patient1_0000_brainmask.nii.gz
 │   ├── patient2_0000.nii.gz
 │   ├── patient2_0000_headmask.nii.gz
+│   ├── patient2_0000_brainmask.nii.gz
 │   └── ...
 ├── mr
 │   ├── patient1_0000.nii.gz
@@ -81,13 +88,22 @@ data_root_dir/
     └── ...
 ```
 
+## Configs
+全部配置文件位于`configs`目录下，每个配置文件均定义了模型、数据位置、使用的数据划分、以及训练超参数等，主要有以下四条数据配置需关注：
+```
+data_root_dir: data/dcm2nii    # 数据存放根目录
+ct_subfolder_name: ct_reg2_mr          # 包含MR和CT子目录
+mr_subfolder_name: pre_head_mr          # 包含MR和CT子目录
+data_json_path: data/dcm2nii/cross_validation_t12ct/cross_validation_fold_0.json    # 若此路径下没有json文件，则会在data_root_dir/cross_validation_t12ct下创建
+```
+
 
 ## Training
 网络模型见下图。
 ![figure](figures/cyclegan_mr2ct_supervise.png)
 模型训练采用分阶段训练方法，按照切patch方式进行，从小patch进行快速训练，再分三个阶段，利用前一阶段的训练权重，逐步增大图像patch进行训练，最终引入transformer结构和window loss。
 
-执行模型训练，模型训练时会读取`headct_reg2_mr`和`pre_head_mr`目录下的CT和MR数据，生成一个包含训练和验证数据的`data/mr2ct_cyclegan.json`文件：
+执行模型训练，模型训练时会读取`headct_reg2_mr`和`pre_head_mr`目录下的CT和MR数据，生成一个包含训练和验证数据的`json`文件：
 ```
 bash scripts/run_train_t12ct.sh
 ```
@@ -112,7 +128,7 @@ python mr2ct_t12ct_one_example.py
 ```
 python mr2ct_t12ct_multistage_eval.py
 ```
-对模型进行评估。本脚本会直接加载之前训练的各个阶段的模型，也加载MR数据的验证集（存储在`data/mr2ct_cyclegan.json`文件中），进行模型评估。
+对模型进行评估。本脚本会直接加载之前训练的各个阶段的模型，也加载MR数据的验证集（存储在`data_json_path`文件中），进行模型评估。
 
 评估指标主要有CT值各HU范围内的平均绝对误差MAE。
 
@@ -122,3 +138,6 @@ python mr2ct_t12ct_multistage_eval.py
 ```
 pip install -r requirements.txt
 ```
+
+## Acknowledgements
+This project used [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md) for model development of head mask extraction and [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping. Thanks to the authors of these tools.
