@@ -139,5 +139,16 @@ python mr2ct_t12ct_multistage_eval.py
 pip install -r requirements.txt
 ```
 
+## Citation
+引用下文:
+```
+@article{gao2025rapid,
+  title={Rapid MRI-Based Synthetic CT Simulations for Precise tFUS Targeting},
+  author={Gao, Hengyu and Ding, Shaodong and Liu, Ziyang and Zhang, Jiefu and Li, Bolun and An, Zhiwu and Wang, Li and Jing, Jing and Liu, Tao and Fan, Yubo and others},
+  journal={arXiv preprint arXiv:2507.08688},
+  year={2025}
+}
+```
+
 ## Acknowledgements
 This project used [nnunetv2](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md) for model development of CT head mask extraction and [synthstrip](https://github.com/freesurfer/freesurfer/tree/dev/mri_synthstrip) for skull stripping. Thanks to the authors of these tools.
