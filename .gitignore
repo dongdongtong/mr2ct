@@ -87,7 +87,6 @@ lib/nms/cpu_nms.c
 
 OUTPUT
 OUTPUT/*
-models/*
 DATASET
 DATASET/*
 external/
